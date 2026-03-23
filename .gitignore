@@ -1,0 +1,9 @@
+.venv/
+.env/
+__pycache__/
+*.pyc
+.DS_Store
+backend/storage/appeals_os.db
+backend/storage/uploads/
+backend/storage/artifacts/
+.streamlit/
