@@ -21,10 +21,23 @@ This project translates your prior document-intelligence stack into a case-cente
 - `ui/app.py` Streamlit Home page
 - `ui/pages/` multipage UI (`AI Chatbox`, `My Cases`)
 - `ui/lib/` shared Streamlit helpers (API + reusable components)
-- `backend/storage/` uploaded files, artifacts, SQLite DB file
+- `storage/` uploaded files, artifacts, SQLite DB file
 - `scripts/` local setup and run helpers
 
 ## Local Setup (No Docker)
+
+### Prerequisites
+
+- Python 3.12 (recommended and the version to use for local setup)
+- `pip` and `venv`
+- Tesseract OCR installed and available on your system `PATH` for image OCR (`.png`, `.jpg`, `.jpeg`, `.tiff`)
+- Optional: Ollama if you want the full AI-powered extraction, letter drafting, and chat experience
+
+Notes:
+
+- PDF/TXT/DOCX flows work without Tesseract, but OCR for image uploads requires a local `tesseract` binary.
+- On Windows, installing Tesseract usually means adding the install directory to `PATH` so `pytesseract` can find `tesseract.exe`.
+- The setup scripts create a local virtual environment in `.venv` and install both backend and UI dependencies from `backend/requirements.txt` and `ui/requirements.txt`.
 
 ### macOS/Linux
 
@@ -34,6 +47,8 @@ From project root:
 ./scripts/setup_local.sh
 ```
 
+If your default `python3` is not Python 3.12, create/activate a Python 3.12 environment first and then run the setup script.
+
 ### Windows (PowerShell)
 
 From project root:
@@ -41,6 +56,8 @@ From project root:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\setup_local.ps1
 ```
+
+The PowerShell setup script prefers `python3.12` and will fall back to other Python 3 launchers if needed, but Python 3.12 is the expected local version for this project.
 
 ## Run Locally
 
@@ -135,8 +152,9 @@ Optional env vars:
 ## Notes
 
 - OCR for image uploads requires a local `tesseract` binary.
+- Supported upload types: PDF, TXT, DOCX, PNG, JPG, JPEG, TIFF
 - For a quick class demo, PDF/TXT/DOCX files are usually enough.
-- Data is stored locally in `backend/storage/appeals_os.db`.
+- Data is stored locally in `storage/appeals_os.db`.
 
 ## Core API Endpoints
 

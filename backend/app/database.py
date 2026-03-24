@@ -149,3 +149,7 @@ def init_db() -> None:
         cur.execute("CREATE INDEX IF NOT EXISTS idx_chunks_case_id ON chunks(case_id);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_tasks_case_id ON tasks(case_id);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_events_case_id ON events(case_id);")
+
+        extraction_columns = {row[1] for row in cur.execute("PRAGMA table_info(case_extractions)").fetchall()}
+        if "mode" not in extraction_columns:
+            cur.execute("ALTER TABLE case_extractions ADD COLUMN mode TEXT NOT NULL DEFAULT 'rule_based';")

@@ -98,6 +98,15 @@ def _require_case(conn, case_id: str):
     return row
 
 
+def _mark_document_failed(conn, *, document_id: str, error: Exception) -> str:
+    error_message = str(error).strip() or error.__class__.__name__
+    conn.execute(
+        "UPDATE documents SET processed_status = ? WHERE document_id = ?",
+        (f"failed: {error_message}", document_id),
+    )
+    return error_message
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     client = OllamaClient()
@@ -213,12 +222,19 @@ async def upload_document(
 
         process_summary = None
         if auto_process:
-            process_summary = process_document(
-                conn,
-                case_id=case_id,
-                document_id=document_id,
-                storage_path=str(storage_path),
-            )
+            try:
+                process_summary = process_document(
+                    conn,
+                    case_id=case_id,
+                    document_id=document_id,
+                    storage_path=str(storage_path),
+                )
+            except Exception as exc:
+                process_summary = {
+                    "pages": 0,
+                    "chunks": 0,
+                    "error": _mark_document_failed(conn, document_id=document_id, error=exc),
+                }
 
         row = conn.execute("SELECT * FROM documents WHERE document_id = ?", (document_id,)).fetchone()
 
@@ -250,12 +266,19 @@ def process_case_docs(case_id: str) -> dict[str, Any]:
 
         results: list[dict[str, Any]] = []
         for doc in docs:
-            summary = process_document(
-                conn,
-                case_id=case_id,
-                document_id=doc["document_id"],
-                storage_path=doc["storage_path"],
-            )
+            try:
+                summary = process_document(
+                    conn,
+                    case_id=case_id,
+                    document_id=doc["document_id"],
+                    storage_path=doc["storage_path"],
+                )
+            except Exception as exc:
+                summary = {
+                    "pages": 0,
+                    "chunks": 0,
+                    "error": _mark_document_failed(conn, document_id=doc["document_id"], error=exc),
+                }
             results.append({"document_id": doc["document_id"], **summary})
 
     return {"case_id": case_id, "processed_documents": results}
@@ -265,8 +288,8 @@ def process_case_docs(case_id: str) -> dict[str, Any]:
 def run_case_extraction(case_id: str) -> dict[str, Any]:
     with get_conn() as conn:
         _require_case(conn, case_id)
-        case_json, warnings = build_case_json(conn, case_id)
-        saved = save_case_extraction(conn, case_id=case_id, case_json=case_json, warnings=warnings)
+        case_json, warnings, mode = build_case_json(conn, case_id)
+        saved = save_case_extraction(conn, case_id=case_id, case_json=case_json, warnings=warnings, mode=mode)
         conn.execute(
             "UPDATE cases SET status = ?, updated_at = ? WHERE case_id = ?",
             ("ready", utc_now_iso(), case_id),

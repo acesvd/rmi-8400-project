@@ -38,6 +38,7 @@ def render_overview(case_payload: dict[str, Any]) -> None:
 
     if extraction:
         st.subheader("Extracted Case JSON")
+        st.caption(f"Extraction mode: {extraction.get('mode', 'unknown')}")
         st.json(extraction.get("case_json", {}))
         warnings = extraction.get("warnings", [])
         if warnings:

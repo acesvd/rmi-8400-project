@@ -25,8 +25,10 @@ def _short(text: str, n: int = 220) -> str:
 def _build_letter_template(case_row: dict[str, Any], extraction: dict[str, Any], citations: list[dict[str, Any]], style: str) -> str:
     case_json = extraction.get("case_json") or {}
     ids = case_json.get("identifiers") or {}
+    parties = case_json.get("parties") or {}
     reasons = case_json.get("denial_reasons") or []
     payer = case_json.get("payer", "unknown")
+    patient_name = parties.get("patient_name", "unknown")
 
     tone_line = "This is a concise appeal summary." if style == "concise" else "This appeal requests full reconsideration based on supporting documentation."
 
@@ -49,6 +51,7 @@ def _build_letter_template(case_row: dict[str, Any], extraction: dict[str, Any],
         "# Appeal Letter Draft",
         "",
         f"Case ID: {case_row['case_id']}",
+        f"Patient: {patient_name}",
         f"Payer: {payer}",
         f"Claim #: {ids.get('claim_number', 'unknown')}",
         f"Auth #: {ids.get('auth_number', 'unknown')}",

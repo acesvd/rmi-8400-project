@@ -59,6 +59,7 @@ def main() -> None:
     extraction = case_payload.get("extraction")
     with st.expander("Case Context", expanded=False):
         if extraction:
+            st.caption(f"Extraction mode: {extraction.get('mode', 'unknown')}")
             st.json(extraction.get("case_json", {}))
         else:
             st.caption("No extraction yet. Go to `My Cases` and run extraction for better responses.")
