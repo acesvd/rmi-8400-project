@@ -150,73 +150,77 @@ def render_event_form(case_id: str, *, key_prefix: str) -> None:
                     st.rerun()
 
 
-def render_case_actions_sidebar(case_id: str | None, *, key_prefix: str) -> None:
-    st.subheader("Case Actions")
+def _trigger_case_action(case_id: str, path: str, success_message: str, *, json_body: dict[str, Any]) -> None:
+    _, err = safe_call(api_post, path, json_body=json_body)
+    if err:
+        st.error(err)
+    else:
+        st.success(success_message)
+        st.rerun()
+
+
+def render_case_actions_panel(case_id: str | None, *, key_prefix: str) -> None:
     if not case_id:
-        st.caption("Select a case to enable actions.")
+        st.caption("Select a case to enable uploads and workflow actions.")
         return
 
-    st.caption(f"Active case: `{case_id}`")
+    st.markdown("### Case Workspace")
+    st.caption("Everything you need for the current case is grouped here, so the workflow stays in the main canvas.")
 
-    uploaded = st.file_uploader(
-        "Upload document",
-        type=["pdf", "txt", "docx", "png", "jpg", "jpeg", "tiff"],
-        key=f"{key_prefix}_upload_file",
-    )
-    doc_type = st.selectbox("Doc type", DOC_TYPES, key=f"{key_prefix}_doc_type")
-    auto_process = st.toggle("Auto process on upload", value=True, key=f"{key_prefix}_auto_process")
+    upload_col, actions_col = st.columns([1.2, 1], gap="large")
 
-    if st.button("Upload Document", use_container_width=True, key=f"{key_prefix}_upload_btn"):
-        if uploaded is None:
-            st.error("Choose a file")
-        else:
-            files = {"file": (uploaded.name, uploaded.getvalue(), uploaded.type or "application/octet-stream")}
-            data = {"doc_type": doc_type, "auto_process": str(auto_process).lower()}
-            _, upload_err = safe_call(api_post, f"/cases/{case_id}/documents", files=files, data=data)
-            if upload_err:
-                st.error(upload_err)
-            else:
-                st.success("Document uploaded")
-                st.rerun()
+    with upload_col:
+        with st.container(border=True):
+            st.markdown("### Upload Documents")
+            st.caption("Add denial letters, EOBs, prior auth records, or supporting medical documents.")
+            uploaded = st.file_uploader(
+                "Upload document",
+                type=["pdf", "txt", "docx", "png", "jpg", "jpeg", "tiff"],
+                key=f"{key_prefix}_upload_file",
+            )
+            doc_type = st.selectbox("Doc type", DOC_TYPES, key=f"{key_prefix}_doc_type")
+            auto_process = st.toggle("Auto process on upload", value=True, key=f"{key_prefix}_auto_process")
 
-    st.divider()
+            if st.button("Upload Document", use_container_width=True, key=f"{key_prefix}_upload_btn"):
+                if uploaded is None:
+                    st.error("Choose a file")
+                else:
+                    files = {"file": (uploaded.name, uploaded.getvalue(), uploaded.type or "application/octet-stream")}
+                    data = {"doc_type": doc_type, "auto_process": str(auto_process).lower()}
+                    _, upload_err = safe_call(api_post, f"/cases/{case_id}/documents", files=files, data=data)
+                    if upload_err:
+                        st.error(upload_err)
+                    else:
+                        st.success("Document uploaded")
+                        st.rerun()
 
-    if st.button("Process Documents", use_container_width=True, key=f"{key_prefix}_process_btn"):
-        _, process_err = safe_call(api_post, f"/cases/{case_id}/process", json_body={})
-        if process_err:
-            st.error(process_err)
-        else:
-            st.success("Processing complete")
-            st.rerun()
+    with actions_col:
+        with st.container(border=True):
+            st.markdown("### Workflow Actions")
+            st.caption("Follow the workflow in order, or jump to the step you need.")
+            st.info("Suggested flow: Process -> Extract -> Generate Tasks -> Generate Letter -> Generate Packet")
+            btn_col1, btn_col2 = st.columns(2)
 
-    if st.button("Run Extraction", use_container_width=True, key=f"{key_prefix}_extract_btn"):
-        _, extract_err = safe_call(api_post, f"/cases/{case_id}/extract", json_body={})
-        if extract_err:
-            st.error(extract_err)
-        else:
-            st.success("Case extraction complete")
-            st.rerun()
+            with btn_col1:
+                if st.button("Process Documents", use_container_width=True, key=f"{key_prefix}_process_btn"):
+                    _trigger_case_action(case_id, f"/cases/{case_id}/process", "Processing complete", json_body={})
+                if st.button("Generate Tasks", use_container_width=True, key=f"{key_prefix}_tasks_btn"):
+                    _trigger_case_action(case_id, f"/cases/{case_id}/tasks/generate", "Tasks generated", json_body={})
+                if st.button("Generate Packet PDF", use_container_width=True, key=f"{key_prefix}_packet_btn"):
+                    _trigger_case_action(
+                        case_id,
+                        f"/cases/{case_id}/packet",
+                        "Packet generated",
+                        json_body={"include_uploaded_pdfs": True},
+                    )
 
-    if st.button("Generate Tasks", use_container_width=True, key=f"{key_prefix}_tasks_btn"):
-        _, task_err = safe_call(api_post, f"/cases/{case_id}/tasks/generate", json_body={})
-        if task_err:
-            st.error(task_err)
-        else:
-            st.success("Tasks generated")
-            st.rerun()
-
-    if st.button("Generate Letter", use_container_width=True, key=f"{key_prefix}_letter_btn"):
-        _, letter_err = safe_call(api_post, f"/cases/{case_id}/letter", json_body={"style": "formal"})
-        if letter_err:
-            st.error(letter_err)
-        else:
-            st.success("Letter generated")
-            st.rerun()
-
-    if st.button("Generate Packet PDF", use_container_width=True, key=f"{key_prefix}_packet_btn"):
-        _, packet_err = safe_call(api_post, f"/cases/{case_id}/packet", json_body={"include_uploaded_pdfs": True})
-        if packet_err:
-            st.error(packet_err)
-        else:
-            st.success("Packet generated")
-            st.rerun()
+            with btn_col2:
+                if st.button("Run Extraction", use_container_width=True, key=f"{key_prefix}_extract_btn"):
+                    _trigger_case_action(case_id, f"/cases/{case_id}/extract", "Case extraction complete", json_body={})
+                if st.button("Generate Letter", use_container_width=True, key=f"{key_prefix}_letter_btn"):
+                    _trigger_case_action(
+                        case_id,
+                        f"/cases/{case_id}/letter",
+                        "Letter generated",
+                        json_body={"style": "formal"},
+                    )
