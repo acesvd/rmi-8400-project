@@ -9,6 +9,7 @@ def main() -> None:
             st.Page("pages/home.py", title="Home", icon="🏠", default=True),
             st.Page("pages/1_AI_Chatbox.py", title="AI Chatbox", icon="💬"),
             st.Page("pages/2_My_Cases.py", title="My Cases", icon="📁"),
+            st.Page("pages/3_A_Score.py", title="A-Score", icon="📊"),
         ]
     )
     navigation.run()
