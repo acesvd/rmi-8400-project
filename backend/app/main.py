@@ -19,6 +19,7 @@ from .schemas import (
 )
 from .services.assistant_chat import answer_case_question
 from .services.case_extraction import build_case_json, latest_case_extraction, save_case_extraction
+from .services.denial_outcomes import get_appealability
 from .services.document_processing import process_document
 from .services.letter import generate_letter_artifact
 from .services.llm import OllamaClient
@@ -445,3 +446,29 @@ def list_events(case_id: str) -> list[dict[str, Any]]:
             (case_id,),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+# --- A1: Appealability Score ---
+
+
+@app.get("/cases/{case_id}/appealability")
+def get_case_appealability(case_id: str) -> dict[str, Any]:
+    """Compute appealability score for a case using historical denial outcomes data.
+
+    Requires extraction to have been run first (POST /cases/{case_id}/extract).
+    Uses S1 (IMR overturn rates) for R1 denials and S3 (insurer benchmark) for R2 denials.
+    """
+    with get_conn() as conn:
+        _require_case(conn, case_id)
+        extraction = latest_case_extraction(conn, case_id)
+
+    if not extraction:
+        raise HTTPException(
+            status_code=400,
+            detail="No extraction found. Run POST /cases/{case_id}/extract first.",
+        )
+
+    case_json = extraction.get("case_json", {})
+    result = get_appealability(case_json)
+    result["case_id"] = case_id
+    return result

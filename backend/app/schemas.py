@@ -91,3 +91,40 @@ class ChatResponse(BaseModel):
     sources: list[dict[str, Any]] = Field(default_factory=list)
     mode: str
     warning: str | None = None
+
+
+# --- A1: Denial Outcomes ---
+
+
+class AppealabilityScore(BaseModel):
+    overturn_rate: float | None = None
+    sample_size: int = 0
+    overturned_count: int = 0
+    upheld_count: int = 0
+    confidence: Literal["high", "medium", "low", "very_low", "none"] = "none"
+    year_range: str = ""
+    source: str = ""
+    note: str = ""
+
+
+class InsurerBenchmark(BaseModel):
+    insurer: str = ""
+    year: int | None = None
+    internal_appeals_filed: int | None = None
+    internal_appeals_overturned: int | None = None
+    internal_overturn_pct: float | None = None
+    external_appeals_filed: int | None = None
+    external_appeals_overturned: int | None = None
+    external_overturn_pct: float | None = None
+    source: str = ""
+    error: str | None = None
+
+
+class AppealabilityResponse(BaseModel):
+    case_id: str
+    denial_classification: Literal["R1", "R2", "technical", "unknown"]
+    denial_label: str = ""
+    payer: str = ""
+    a_score: AppealabilityScore = Field(default_factory=AppealabilityScore)
+    insurer_benchmark: InsurerBenchmark = Field(default_factory=InsurerBenchmark)
+    recommendations: list[str] = Field(default_factory=list)

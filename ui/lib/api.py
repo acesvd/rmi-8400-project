@@ -60,6 +60,10 @@ def fetch_health() -> tuple[dict[str, Any] | None, str | None]:
     return safe_call(api_get, "/health")
 
 
+def fetch_appealability(case_id: str) -> tuple[dict[str, Any] | None, str | None]:
+    return safe_call(api_get, f"/cases/{case_id}/appealability")
+
+
 def select_case(cases: list[dict[str, Any]], *, key_prefix: str, label: str = "Select case") -> str | None:
     if not cases:
         st.session_state.selected_case_id = None

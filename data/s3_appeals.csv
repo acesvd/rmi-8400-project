@@ -1,0 +1,76 @@
+year,insurer,internal_appeals_filed,internal_appeals_overturned,internal_overturn_pct,external_appeals_filed,external_appeals_overturned,external_overturn_pct,source
+2018,Anthem Blue Cross,718,400,55.7,15,8,53.3,inline_html
+2018,Blue Shield of California,10516,3955,37.6,214,96,44.9,inline_html
+2018,CCHP Health Plan,146,95,65.1,8,1,12.5,inline_html
+2018,Health Net,2406,1379,57.3,19,10,52.6,inline_html
+2018,Kaiser Permanente,1214,1105,91.0,13,2,15.4,inline_html
+2018,Molina Healthcare,160,62,38.8,12,9,75.0,inline_html
+2018,Oscar,218,79,36.2,6,2,33.3,inline_html
+2018,Sharp Health Plan,169,37,21.9,24,7,29.2,inline_html
+2018,Valley Health Plan,157,31,19.7,29,12,41.4,inline_html
+2018,Western Health Advantage,80,24,30.0,22,3,13.6,inline_html
+2019,Anthem Blue Cross,423,338,79.9,4,1,25.0,inline_html
+2019,Blue Shield of California,12241,4472,36.5,193,112,58.0,inline_html
+2019,CCHP Health Plan,171,114,66.7,6,2,33.3,inline_html
+2019,Health Net,2132,997,46.8,399,2,0.5,inline_html
+2019,Kaiser Permanente,553,469,84.8,29,7,24.1,inline_html
+2019,LA Care Health Plan,6632,2375,35.8,4,3,75.0,inline_html
+2019,Molina Healthcare,135,54,40.0,9,6,66.7,inline_html
+2019,Oscar,1195,401,33.6,10,5,50.0,inline_html
+2019,Sharp Health Plan,108,32,29.6,22,1,4.5,inline_html
+2019,Valley Health Plan,106,52,49.1,32,15,46.9,inline_html
+2019,Western Health Advantage,73,24,32.9,4,1,25.0,inline_html
+2020,Anthem Blue Cross,862,505,58.6,18,13,72.2,inline_html
+2020,Blue Shield of California,12579,4213,33.5,220,151,68.6,inline_html
+2020,CCHP Health Plan,73,0,0.0,0,0,,inline_html
+2020,Health Net,2576,1206,46.8,323,6,1.9,inline_html
+2020,Kaiser Permanente,185,61,33.0,1,1,100.0,inline_html
+2020,LA Care Health Plan,665,402,60.5,9051,3505,38.7,inline_html
+2020,Molina Healthcare,540,95,17.6,1,1,100.0,inline_html
+2020,Oscar,82,79,96.3,10,10,100.0,inline_html
+2020,Sharp Health Plan,109,30,27.5,29,12,41.4,inline_html
+2020,Valley Health Plan,138,58,42.0,12,4,33.3,inline_html
+2020,Western Health Advantage,99,39,39.4,7,1,14.3,inline_html
+2021,Anthem Blue Cross,875,550,62.9,34,27,79.4,inline_html
+2021,Blue Shield of California,11481,3980,34.7,189,120,63.5,inline_html
+2021,CCHP Health Plan,354,326,92.1,0,0,,inline_html
+2021,Health Net,2244,1049,46.7,202,1,0.5,inline_html
+2021,Kaiser Permanente,226,65,28.8,30,15,50.0,inline_html
+2021,LA Care Health Plan,8178,2721,33.3,4,1,25.0,inline_html
+2021,Molina Healthcare,631,113,17.9,2,0,0.0,inline_html
+2021,Sharp Health Plan,133,75,56.4,0,0,,inline_html
+2021,Valley Health Plan,156,70,44.9,18,5,27.8,inline_html
+2021,Western Health Advantage,82,30,36.6,5,2,40.0,inline_html
+2022,Anthem Blue Cross,2029,1328,65.5,15,12,80.0,inline_html
+2022,Blue Shield of California,14585,5978,41.0,124,71,57.3,inline_html
+2022,CCHP Health Plan,174,159,91.4,0,0,,inline_html
+2022,Health Net,989,2188,221.2,443,15,3.4,inline_html
+2022,Kaiser Permanente,237,89,37.6,22,5,22.7,inline_html
+2022,LA Care Health Plan,19585,10820,55.2,8,2,25.0,inline_html
+2022,Molina Healthcare,535,80,15.0,37,7,18.9,inline_html
+2022,Sharp Health Plan,288,152,52.8,15,6,40.0,inline_html
+2022,Valley Health Plan,127,89,70.1,7,5,71.4,inline_html
+2022,Western Health Advantage,123,60,48.8,8,3,37.5,inline_html
+2023,Aetna CVSHealth,2,10,500.0,938,1310,139.7,pdf
+2023,Anthem Blue Cross,2,10,500.0,938,1310,139.7,pdf
+2023,Blue Shield of California,2,10,500.0,938,1310,139.7,pdf
+2023,CCHP Health Plan,2,10,500.0,938,1310,139.7,pdf
+2023,Health Net,2,10,500.0,938,1310,139.7,pdf
+2023,Kaiser Permanente,2025,2023,99.9,2023,2023,100.0,pdf
+2023,LA Care Health Plan,2,10,500.0,938,1310,139.7,pdf
+2023,Molina Healthcare,2,10,500.0,938,1310,139.7,pdf
+2023,Sharp Health Plan,2,10,500.0,938,1310,139.7,pdf
+2023,Valley Health Plan,2,10,500.0,938,1310,139.7,pdf
+2023,Western Health Advantage,2,10,500.0,938,1310,139.7,pdf
+2024,Anthem Blue Cross,2,10,500.0,938,1310,139.7,pdf
+2024,Blue Shield of California,2,10,500.0,938,1310,139.7,pdf
+2024,CCHP Health Plan,2,10,500.0,938,1310,139.7,pdf
+2024,Health Net,2,10,500.0,938,1310,139.7,pdf
+2024,Humana,2,10,500.0,938,1310,139.7,pdf
+2024,Inland Empire Health Plan,2,10,500.0,938,1310,139.7,pdf
+2024,Kaiser Permanente,2,10,500.0,938,1310,139.7,pdf
+2024,LA Care Health Plan,2,10,500.0,938,1310,139.7,pdf
+2024,Molina Healthcare,2,10,500.0,938,1310,139.7,pdf
+2024,Sharp Health Plan,2,10,500.0,938,1310,139.7,pdf
+2024,Valley Health Plan,2,10,500.0,938,1310,139.7,pdf
+2024,Western Health Advantage,2,10,500.0,938,1310,139.7,pdf
