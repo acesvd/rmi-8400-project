@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -7,11 +8,12 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from .config import UPLOAD_DIR
+from .config import ARTIFACT_DIR, UPLOAD_DIR
 from .database import get_conn, init_db
 from .schemas import (
     ChatRequest,
     CaseCreate,
+    CaseExtractionManualUpdate,
     EventCreate,
     LetterRequest,
     PacketRequest,
@@ -108,6 +110,65 @@ def _mark_document_failed(conn, *, document_id: str, error: Exception) -> str:
     return error_message
 
 
+def _normalize_text(value: str | None, *, default: str = "unknown") -> str:
+    text = (value or "").strip()
+    return text if text else default
+
+
+def _normalize_csv_like(values: list[str] | None, *, lower: bool = False) -> list[str]:
+    if not values:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        for token in str(raw).replace("\n", ",").split(","):
+            item = token.strip()
+            if not item:
+                continue
+            if lower:
+                item = item.lower()
+            if item in seen:
+                continue
+            seen.add(item)
+            out.append(item)
+    return out
+
+
+def _normalize_reason_label(label: str) -> str:
+    clean = str(label).strip().lower().replace("-", "_").replace(" ", "_")
+    allowed = {"administrative", "medical_necessity", "prior_authorization", "coding_billing", "out_of_network"}
+    if clean in allowed:
+        return clean
+    return "administrative"
+
+
+def _manual_reason_item(label: str) -> dict[str, Any]:
+    normalized = _normalize_reason_label(label)
+    return {
+        "label": normalized,
+        "keyword": "manual_entry",
+        "supporting_quote": "Manually entered by user.",
+        "citation": {
+            "document_id": "manual_entry",
+            "file_name": "Manual Entry",
+            "page_number": 0,
+        },
+    }
+
+
+def _manual_deadline_item(value: str) -> dict[str, Any]:
+    deadline_value = _normalize_text(value, default="")
+    return {
+        "value": deadline_value,
+        "citation": {
+            "document_id": "manual_entry",
+            "file_name": "Manual Entry",
+            "page_number": 0,
+            "quote": "Manually entered by user.",
+        },
+    }
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     client = OllamaClient()
@@ -140,6 +201,25 @@ def list_cases() -> list[dict[str, Any]]:
     with get_conn() as conn:
         rows = conn.execute("SELECT * FROM cases ORDER BY updated_at DESC").fetchall()
     return [_row_to_case(r) for r in rows]
+
+
+@app.delete("/cases/{case_id}")
+def delete_case(case_id: str) -> dict[str, Any]:
+    upload_case_dir = UPLOAD_DIR / case_id
+    artifact_case_dir = ARTIFACT_DIR / case_id
+
+    with get_conn() as conn:
+        case_row = _require_case(conn, case_id)
+        conn.execute("DELETE FROM cases WHERE case_id = ?", (case_id,))
+
+    shutil.rmtree(upload_case_dir, ignore_errors=True)
+    shutil.rmtree(artifact_case_dir, ignore_errors=True)
+
+    return {
+        "deleted": True,
+        "case_id": case_id,
+        "title": case_row["title"],
+    }
 
 
 @app.get("/cases/{case_id}")
@@ -308,6 +388,109 @@ def get_case_extraction(case_id: str) -> dict[str, Any]:
     return extraction
 
 
+@app.patch("/cases/{case_id}/extract")
+def update_case_extraction(case_id: str, body: CaseExtractionManualUpdate) -> dict[str, Any]:
+    with get_conn() as conn:
+        _require_case(conn, case_id)
+        extraction = latest_case_extraction(conn, case_id)
+        if not extraction:
+            raise HTTPException(status_code=400, detail="Run extraction first")
+
+        current = extraction.get("case_json") or {}
+        current_identifiers = current.get("identifiers") if isinstance(current.get("identifiers"), dict) else {}
+        current_parties = current.get("parties") if isinstance(current.get("parties"), dict) else {}
+        fields_set = set(getattr(body, "model_fields_set", set()))
+
+        normalized_reasons = _normalize_csv_like(body.denial_reasons, lower=False)
+        normalized_deadlines = _normalize_csv_like(body.deadlines, lower=False)
+        normalized_channels = _normalize_csv_like(body.submission_channels, lower=True)
+        normalized_docs = _normalize_csv_like(body.requested_documents, lower=True)
+
+        payer = (
+            _normalize_text(body.payer, default=current.get("payer", "unknown"))
+            if "payer" in fields_set
+            else _normalize_text(current.get("payer"), default="unknown")
+        )
+        plan_type = (
+            _normalize_text(body.plan_type, default=current.get("plan_type", "unknown"))
+            if "plan_type" in fields_set
+            else _normalize_text(current.get("plan_type"), default="unknown")
+        )
+
+        claim_number = (
+            _normalize_text(body.claim_number, default=current_identifiers.get("claim_number", "unknown"))
+            if "claim_number" in fields_set
+            else _normalize_text(current_identifiers.get("claim_number"), default="unknown")
+        )
+        auth_number = (
+            _normalize_text(body.auth_number, default=current_identifiers.get("auth_number", "unknown"))
+            if "auth_number" in fields_set
+            else _normalize_text(current_identifiers.get("auth_number"), default="unknown")
+        )
+        member_id = (
+            _normalize_text(body.member_id, default=current_identifiers.get("member_id", "unknown"))
+            if "member_id" in fields_set
+            else _normalize_text(current_identifiers.get("member_id"), default="unknown")
+        )
+
+        patient_name = (
+            _normalize_text(body.patient_name, default=current_parties.get("patient_name", "unknown"))
+            if "patient_name" in fields_set
+            else _normalize_text(current_parties.get("patient_name"), default="unknown")
+        )
+        claimant_name = (
+            _normalize_text(body.claimant_name, default=current_parties.get("claimant_name", "unknown"))
+            if "claimant_name" in fields_set
+            else _normalize_text(current_parties.get("claimant_name"), default="unknown")
+        )
+
+        updated_case_json = {
+            **current,
+            "payer": payer,
+            "plan_type": plan_type,
+            "identifiers": {
+                "claim_number": claim_number,
+                "auth_number": auth_number,
+                "member_id": member_id,
+            },
+            "parties": {
+                "patient_name": patient_name,
+                "claimant_name": claimant_name,
+            },
+            "denial_reasons": (
+                [_manual_reason_item(reason) for reason in normalized_reasons]
+                if "denial_reasons" in fields_set
+                else current.get("denial_reasons", [])
+            ),
+            "deadlines": (
+                [_manual_deadline_item(deadline) for deadline in normalized_deadlines]
+                if "deadlines" in fields_set
+                else current.get("deadlines", [])
+            ),
+            "submission_channels": (
+                normalized_channels if "submission_channels" in fields_set else current.get("submission_channels", [])
+            ),
+            "requested_documents": (
+                normalized_docs if "requested_documents" in fields_set else current.get("requested_documents", [])
+            ),
+        }
+
+        existing_warnings = extraction.get("warnings") or []
+        manual_warning = "Case extraction includes manual user edits."
+        warnings = [manual_warning, *[w for w in existing_warnings if w != manual_warning]]
+
+        saved = save_case_extraction(
+            conn,
+            case_id=case_id,
+            case_json=updated_case_json,
+            warnings=warnings,
+            mode="manual_edit",
+        )
+        conn.execute("UPDATE cases SET updated_at = ? WHERE case_id = ?", (utc_now_iso(), case_id))
+
+    return saved
+
+
 @app.post("/cases/{case_id}/tasks/generate")
 def generate_case_tasks(case_id: str) -> list[dict[str, Any]]:
     with get_conn() as conn:
@@ -369,6 +552,60 @@ def create_packet(case_id: str, body: PacketRequest) -> dict[str, Any]:
             include_uploaded_pdfs=body.include_uploaded_pdfs,
         )
     return artifact
+
+
+@app.post("/chat")
+def general_chat(body: ChatRequest) -> dict[str, Any]:
+    warning = (
+        "This is general guidance without case-specific context. "
+        "Create or select a case for personalized appeal support."
+    )
+    client = OllamaClient()
+    if not client.is_available():
+        return {
+            "answer": (
+                "I can help with general claim appeal questions, but the LLM service is currently unavailable. "
+                "Please try again shortly or switch to a case-specific chat."
+            ),
+            "sources": [],
+            "mode": "general_fallback",
+            "warning": warning,
+        }
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are ClaimRight's general assistant for denied health insurance claims. "
+                "Provide concise, practical educational guidance in plain language. "
+                "Do not invent case facts. Mention when users should seek clinician/legal help."
+            ),
+        },
+        {"role": "user", "content": body.question.strip()},
+    ]
+
+    try:
+        answer = client.chat(messages=messages, model=client.config.chat_model, temperature=0.2)
+    except Exception as exc:
+        return {
+            "answer": (
+                "I couldn't generate a general response right now. "
+                f"Please try again. Error: {exc}"
+            ),
+            "sources": [],
+            "mode": "general_error",
+            "warning": warning,
+        }
+
+    if not answer:
+        answer = "I did not find enough information to answer that. Please rephrase and try again."
+
+    return {
+        "answer": answer,
+        "sources": [],
+        "mode": "general",
+        "warning": warning,
+    }
 
 
 @app.post("/cases/{case_id}/chat")

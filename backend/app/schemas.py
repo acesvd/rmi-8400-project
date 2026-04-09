@@ -35,6 +35,20 @@ class CaseExtractionOut(BaseModel):
     created_at: str
 
 
+class CaseExtractionManualUpdate(BaseModel):
+    payer: str | None = None
+    plan_type: str | None = None
+    patient_name: str | None = None
+    claimant_name: str | None = None
+    claim_number: str | None = None
+    auth_number: str | None = None
+    member_id: str | None = None
+    denial_reasons: list[str] = Field(default_factory=list)
+    deadlines: list[str] = Field(default_factory=list)
+    submission_channels: list[str] = Field(default_factory=list)
+    requested_documents: list[str] = Field(default_factory=list)
+
+
 class TaskOut(BaseModel):
     task_id: str
     case_id: str

@@ -12,6 +12,8 @@ TIMEOUT = int(os.getenv("APPEALS_API_TIMEOUT", "120"))
 DOC_TYPES = ["denial_letter", "eob", "prior_auth", "medical_records", "other"]
 TASK_STATUSES = ["todo", "waiting", "done"]
 EVENT_TYPES = ["submitted", "followup", "decision", "phone_call"]
+CASE_WORKSPACE_FLOW_KEY = "case_workspace_flow"
+CASE_WORKSPACE_PENDING_TITLE_KEY = "case_workspace_pending_title"
 
 
 def api_get(path: str):
@@ -32,16 +34,42 @@ def api_patch(path: str, *, json_body: dict[str, Any]):
     return r.json()
 
 
+def api_delete(path: str):
+    r = requests.delete(f"{API_BASE}{path}", timeout=TIMEOUT)
+    r.raise_for_status()
+    return r.json()
+
+
 def safe_call(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs), None
     except requests.RequestException as exc:
+        detail = ""
+        resp = getattr(exc, "response", None)
+        if resp is not None:
+            try:
+                payload = resp.json()
+                if isinstance(payload, dict) and payload.get("detail"):
+                    detail = str(payload["detail"])
+            except ValueError:
+                body = (resp.text or "").strip()
+                if body:
+                    detail = body[:400]
+
+        if detail:
+            return None, f"{exc} | Details: {detail}"
         return None, str(exc)
 
 
 def ensure_state() -> None:
     if "selected_case_id" not in st.session_state:
         st.session_state.selected_case_id = None
+
+
+def open_case_workspace_create_flow() -> None:
+    st.session_state[CASE_WORKSPACE_FLOW_KEY] = "create"
+    st.session_state[CASE_WORKSPACE_PENDING_TITLE_KEY] = ""
+    st.switch_page("pages/5_Case_Workspace.py")
 
 
 def case_label(case: dict[str, Any]) -> str:
@@ -62,6 +90,10 @@ def fetch_health() -> tuple[dict[str, Any] | None, str | None]:
 
 def fetch_appealability(case_id: str) -> tuple[dict[str, Any] | None, str | None]:
     return safe_call(api_get, f"/cases/{case_id}/appealability")
+
+
+def delete_case(case_id: str) -> tuple[dict[str, Any] | None, str | None]:
+    return safe_call(api_delete, f"/cases/{case_id}")
 
 
 def select_case(cases: list[dict[str, Any]], *, key_prefix: str, label: str = "Select case") -> str | None:

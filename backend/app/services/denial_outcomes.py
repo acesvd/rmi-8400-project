@@ -336,7 +336,41 @@ def get_precedent_cases(
 
 _tfidf_vectorizer = None
 _tfidf_matrix = None
-_tfidf_doc_hashes: list[int] | None = None
+_tfidf_doc_hash: int | None = None
+
+
+def _fallback_rank(query: str, documents: list[str]) -> list[float]:
+    """Lightweight lexical ranking fallback when sklearn is unavailable.
+
+    This keeps A-Score usable in minimal backend environments where
+    scikit-learn is not installed.
+    """
+    import re
+
+    q_tokens = re.findall(r"[a-zA-Z0-9]{3,}", (query or "").lower())
+    if not q_tokens:
+        return [0.0 for _ in documents]
+
+    q_set = set(q_tokens)
+    scores: list[float] = []
+    for doc in documents:
+        d_tokens = re.findall(r"[a-zA-Z0-9]{3,}", (doc or "").lower())
+        if not d_tokens:
+            scores.append(0.0)
+            continue
+
+        d_set = set(d_tokens)
+        overlap = q_set & d_set
+        if not overlap:
+            scores.append(0.0)
+            continue
+
+        # Blend query-coverage and doc-specificity for a stable 0..1-ish score.
+        q_cov = len(overlap) / max(1, len(q_set))
+        d_cov = len(overlap) / max(1, len(d_set))
+        scores.append(round(0.7 * q_cov + 0.3 * d_cov, 6))
+
+    return scores
 
 
 def _tfidf_rank(query: str, documents: list[str]) -> list[float]:
@@ -345,32 +379,44 @@ def _tfidf_rank(query: str, documents: list[str]) -> list[float]:
     Uses sklearn's TfidfVectorizer. Caches the vectorizer across calls
     if the document set hasn't changed.
     """
-    global _tfidf_vectorizer, _tfidf_matrix, _tfidf_doc_hashes
+    global _tfidf_vectorizer, _tfidf_matrix, _tfidf_doc_hash
 
-    from sklearn.feature_extraction.text import TfidfVectorizer
-    from sklearn.metrics.pairwise import cosine_similarity
+    try:
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.metrics.pairwise import cosine_similarity
+    except Exception as exc:
+        logger.warning("TF-IDF fallback: sklearn unavailable (%s)", exc)
+        return _fallback_rank(query, documents)
 
     # Check if we can reuse cached matrix
     doc_hash = hash(tuple(hash(d[:100]) for d in documents[:50]))
-    if _tfidf_vectorizer is not None and _tfidf_doc_hashes == doc_hash:
+    if _tfidf_vectorizer is not None and _tfidf_doc_hash == doc_hash:
         # Reuse cached — just transform the query
+        try:
+            query_vec = _tfidf_vectorizer.transform([query])
+            similarities = cosine_similarity(query_vec, _tfidf_matrix).flatten()
+            return similarities.tolist()
+        except Exception as exc:
+            logger.warning("TF-IDF cache reuse failed, using fallback rank (%s)", exc)
+            return _fallback_rank(query, documents)
+
+    # Build new TF-IDF matrix
+    try:
+        _tfidf_vectorizer = TfidfVectorizer(
+            max_features=10000,
+            stop_words="english",
+            ngram_range=(1, 2),  # unigrams + bigrams for medical phrases
+            sublinear_tf=True,
+        )
+        _tfidf_matrix = _tfidf_vectorizer.fit_transform(documents)
+        _tfidf_doc_hash = doc_hash
+
         query_vec = _tfidf_vectorizer.transform([query])
         similarities = cosine_similarity(query_vec, _tfidf_matrix).flatten()
         return similarities.tolist()
-
-    # Build new TF-IDF matrix
-    _tfidf_vectorizer = TfidfVectorizer(
-        max_features=10000,
-        stop_words="english",
-        ngram_range=(1, 2),  # unigrams + bigrams for medical phrases
-        sublinear_tf=True,
-    )
-    _tfidf_matrix = _tfidf_vectorizer.fit_transform(documents)
-    _tfidf_doc_hashes = doc_hash
-
-    query_vec = _tfidf_vectorizer.transform([query])
-    similarities = cosine_similarity(query_vec, _tfidf_matrix).flatten()
-    return similarities.tolist()
+    except Exception as exc:
+        logger.warning("TF-IDF computation failed, using fallback rank (%s)", exc)
+        return _fallback_rank(query, documents)
 
 
 # ---------------------------------------------------------------------------
@@ -543,7 +589,7 @@ def _compute_agent_score(
     # Fallback: rule-based assessment
     if rate is not None:
         pct = int(rate * 100)
-        if pct >= 60:
+        if pct >= 70:
             strength = "strong"
             assessment = (
                 f"Based on {n} similar IMR cases, {pct}% were overturned — this gives your appeal a strong foundation. "
@@ -882,7 +928,7 @@ def get_appealability(case_json: dict[str, Any]) -> dict[str, Any]:
             recs.append(
                 f"Based on {n} similar IMR cases, {rate_pct}% of {imr_type.lower()} "
                 f"denials were overturned. This is a "
-                f"{'strong' if rate_pct >= 60 else 'moderate' if rate_pct >= 40 else 'limited'} "
+                f"{'strong' if rate_pct >= 70 else 'moderate' if rate_pct >= 40 else 'limited'} "
                 f"basis for appeal."
             )
             if rate_pct >= 50:

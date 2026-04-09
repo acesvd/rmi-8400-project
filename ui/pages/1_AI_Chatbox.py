@@ -1,18 +1,25 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+import re
+import time
+from typing import Any
+
 import streamlit as st
 
 from lib.api import (
     api_post,
-    create_case_form,
     ensure_state,
     fetch_case_payload,
     fetch_cases,
     fetch_health,
+    open_case_workspace_create_flow,
     safe_call,
     select_case,
 )
 from lib.components import render_sources
+
+CHAT_MODES = {"select", "general"}
 
 
 def _inject_page_styles() -> None:
@@ -23,28 +30,60 @@ def _inject_page_styles() -> None:
             padding: 1.35rem 1.5rem;
             border-radius: 24px;
             background:
-                radial-gradient(circle at top right, rgba(161, 211, 199, 0.25), transparent 32%),
-                linear-gradient(135deg, #1a2833 0%, #23566a 55%, #6db8a6 100%);
-            color: #f5f7f2;
+                radial-gradient(circle at 8% 12%, rgba(255, 205, 133, 0.34), transparent 35%),
+                radial-gradient(circle at 97% -8%, rgba(125, 209, 198, 0.35), transparent 33%),
+                radial-gradient(circle at 74% 88%, rgba(118, 192, 204, 0.18), transparent 42%),
+                linear-gradient(126deg, #f8fcfc 0%, #e8f5f5 52%, #d7eceb 100%);
+            color: #173533;
             margin-bottom: 1rem;
-            box-shadow: 0 18px 38px rgba(26, 40, 51, 0.2);
+            border: 1px solid #c5dbd8;
+            box-shadow: 0 16px 34px rgba(22, 46, 43, 0.16);
+            position: relative;
+            overflow: hidden;
+        }
+        .chat-hero::before {
+            content: "";
+            position: absolute;
+            width: 250px;
+            height: 250px;
+            top: -128px;
+            right: -95px;
+            border-radius: 999px;
+            background: rgba(136, 209, 198, 0.34);
+        }
+        .chat-hero::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background:
+                radial-gradient(circle, rgba(39, 122, 116, 0.1) 1.05px, transparent 1.2px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0) 46%);
+            background-size: 18px 18px, 100% 100%;
+            opacity: 0.38;
+            pointer-events: none;
+            mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.35) 0%, rgba(0, 0, 0, 0) 72%);
+        }
+        .chat-hero > * {
+            position: relative;
+            z-index: 1;
         }
         .chat-kicker {
             text-transform: uppercase;
             letter-spacing: 0.12em;
             font-size: 0.75rem;
-            opacity: 0.82;
+            color: #2a6662;
             margin-bottom: 0.35rem;
         }
         .chat-hero h2 {
             margin: 0;
             font-size: 2rem;
             line-height: 1.1;
+            color: #173533;
         }
         .chat-hero p {
             margin: 0.55rem 0 0;
             max-width: 48rem;
-            color: rgba(245, 247, 242, 0.9);
+            color: #325a58;
         }
         .section-label {
             text-transform: uppercase;
@@ -131,7 +170,7 @@ def _status_class(status: str | None) -> str:
 def _render_active_case_header(case_payload: dict | None, case_id: str | None) -> None:
     if not case_id:
         st.markdown('<p class="section-label">Active Case</p>', unsafe_allow_html=True)
-        st.info("Create or select a case above to start chatting.")
+        st.info("Create or select a case to start case-context chat.")
         return
 
     case = (case_payload or {}).get("case", {})
@@ -165,17 +204,346 @@ def _render_sidebar_status_item(label: str, value: str, *, tone: str = "neutral"
     st.write(f"{label}: `{value}`")
 
 
+def _mode_label(mode: str | None) -> str:
+    labels = {
+        "select": "Select Case",
+        "general": "General Chat",
+    }
+    return labels.get(mode or "", "Not selected")
+
+
+def _render_mode_choice(cases: list[dict[str, Any]], cases_err: str | None) -> None:
+    st.markdown('<p class="section-label">Choose Chat Type</p>', unsafe_allow_html=True)
+    st.markdown("### Start Here")
+
+    select_col, general_col = st.columns(2, gap="large")
+
+    with select_col:
+        with st.container(border=True):
+            st.subheader("Select a Case")
+            st.caption("Pick an existing case and chat with full case-specific context.")
+            select_disabled = bool(cases_err) or not bool(cases)
+            if st.button(
+                "Choose Select Case",
+                icon=":material/folder_open:",
+                use_container_width=True,
+                key="chat_mode_select_btn",
+                disabled=select_disabled,
+            ):
+                st.session_state["chat_entry_mode"] = "select"
+                st.rerun()
+
+            if cases_err:
+                st.caption("Unavailable while case API is down.")
+            elif not cases:
+                st.caption("No cases yet. Create one in Case Workspace.")
+
+            if st.button(
+                "Create Case in Workspace",
+                icon=":material/add_circle:",
+                use_container_width=True,
+                key="chat_mode_choice_create_case_btn",
+            ):
+                open_case_workspace_create_flow()
+
+    with general_col:
+        with st.container(border=True):
+            st.subheader("General Chat")
+            st.caption("Ask general appeal questions without case context.")
+            if st.button(
+                "Choose General Chat",
+                icon=":material/chat:",
+                use_container_width=True,
+                key="chat_mode_general_btn",
+            ):
+                st.session_state["chat_entry_mode"] = "general"
+                st.rerun()
+
+
+def _render_mode_bar(mode: str) -> None:
+    bar_col1, bar_col2 = st.columns([4, 1], gap="large")
+    with bar_col1:
+        st.caption(f"Current chat type: **{_mode_label(mode)}**")
+    with bar_col2:
+        if st.button("Change Option", icon=":material/swap_horiz:", use_container_width=True):
+            st.session_state["chat_entry_mode"] = None
+            st.rerun()
+
+
+def _display_value(value: Any) -> str:
+    if value is None:
+        return "—"
+    text = str(value).strip()
+    if not text or text.lower() == "unknown":
+        return "—"
+    return text
+
+
+def _reason_label(label: str | None) -> str:
+    mapping = {
+        "administrative": "Administrative",
+        "medical_necessity": "Medical Necessity",
+        "prior_authorization": "Prior Authorization",
+        "coding_billing": "Coding / Billing",
+        "out_of_network": "Out of Network",
+    }
+    normalized = (label or "").strip().lower()
+    if normalized in mapping:
+        return mapping[normalized]
+    if not normalized:
+        return "Unspecified"
+    return normalized.replace("_", " ").title()
+
+
+def _render_case_context(case_payload: dict[str, Any]) -> None:
+    with st.container(border=True):
+        st.markdown('<p class="section-label">Context</p>', unsafe_allow_html=True)
+        st.subheader("Case Context")
+        extraction = case_payload.get("extraction")
+        if not extraction:
+            st.info("No extraction yet. Run extraction from Case Workspace for richer context.")
+            return
+
+        case_json = extraction.get("case_json") or {}
+        reasons = case_json.get("denial_reasons") or []
+        deadlines = case_json.get("deadlines") or []
+        parties = case_json.get("parties") if isinstance(case_json.get("parties"), dict) else {}
+        identifiers = case_json.get("identifiers") if isinstance(case_json.get("identifiers"), dict) else {}
+        channels = case_json.get("submission_channels") if isinstance(case_json.get("submission_channels"), list) else []
+        requested_docs = case_json.get("requested_documents") if isinstance(case_json.get("requested_documents"), list) else []
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Payer", str(case_json.get("payer") or "unknown"))
+        c2.metric("Denial Reasons", str(len(reasons)))
+        c3.metric("Deadlines", str(len(deadlines)))
+
+        with st.expander("View extracted context details", expanded=False):
+            with st.container(border=True):
+                st.markdown("#### Parties")
+                st.write(f"Patient: **{_display_value(parties.get('patient_name'))}**")
+                st.write(f"Claimant: **{_display_value(parties.get('claimant_name'))}**")
+                st.write(f"Payer: **{_display_value(case_json.get('payer'))}**")
+                st.write(f"Plan Type: **{_display_value(case_json.get('plan_type'))}**")
+
+            with st.container(border=True):
+                st.markdown("#### Claim Identifiers")
+                st.write(f"Claim Number: **{_display_value(identifiers.get('claim_number'))}**")
+                st.write(f"Auth Number: **{_display_value(identifiers.get('auth_number'))}**")
+                st.write(f"Member ID: **{_display_value(identifiers.get('member_id'))}**")
+
+            st.markdown("#### Denial Reasons")
+            if reasons:
+                for idx, reason in enumerate(reasons, 1):
+                    if isinstance(reason, dict):
+                        label = _reason_label(reason.get("label"))
+                        quote = _display_value(reason.get("supporting_quote"))
+                        citation = reason.get("citation") if isinstance(reason.get("citation"), dict) else {}
+                        file_name = _display_value(citation.get("file_name"))
+                        page_no = _display_value(citation.get("page_number"))
+                    else:
+                        label = _reason_label(str(reason))
+                        quote = "—"
+                        file_name = "—"
+                        page_no = "—"
+
+                    with st.container(border=True):
+                        st.markdown(f"**{idx}. {label}**")
+                        if quote != "—":
+                            st.caption(quote)
+                        if file_name != "—" or page_no != "—":
+                            st.caption(f"Source: {file_name} · p.{page_no}")
+            else:
+                st.info("No denial reasons were extracted yet.")
+
+            with st.container(border=True):
+                st.markdown("#### Deadlines")
+                if deadlines:
+                    rows = []
+                    for item in deadlines:
+                        if isinstance(item, dict):
+                            citation = item.get("citation") if isinstance(item.get("citation"), dict) else {}
+                            source_file = _display_value(citation.get("file_name"))
+                            source_page = _display_value(citation.get("page_number"))
+                            source = "—"
+                            if source_file != "—" or source_page != "—":
+                                source = f"{source_file} · p.{source_page}"
+                            rows.append({"Deadline": _display_value(item.get("value")), "Source": source})
+                        else:
+                            rows.append({"Deadline": _display_value(item), "Source": "—"})
+                    st.dataframe(rows, hide_index=True, use_container_width=True)
+                else:
+                    st.info("No explicit deadlines detected.")
+
+            with st.container(border=True):
+                st.markdown("#### Submission Channels")
+                if channels:
+                    for channel in channels:
+                        st.write(f"- {_display_value(channel).title()}")
+                else:
+                    st.info("No submission channels detected.")
+
+                st.markdown("#### Requested Documents")
+                if requested_docs:
+                    for doc in requested_docs:
+                        st.write(f"- {_display_value(doc).replace('_', ' ').title()}")
+                else:
+                    st.info("No missing document requests detected.")
+
+
+def _ask_case_question(case_id: str, question: str) -> tuple[dict[str, Any] | None, str | None]:
+    return safe_call(
+        api_post,
+        f"/cases/{case_id}/chat",
+        json_body={"question": question},
+    )
+
+
+def _ask_general_question(question: str) -> tuple[dict[str, Any] | None, str | None]:
+    body, err = safe_call(
+        api_post,
+        "/chat",
+        json_body={"question": question},
+    )
+    if err and "/chat" in err and "404" in err:
+        return (
+            {
+                "answer": (
+                    "General Chat is not available on the currently running backend. "
+                    "Restart the backend so it picks up the new `POST /chat` endpoint, then try again."
+                ),
+                "sources": [],
+                "mode": "general_setup_required",
+                "warning": "Backend restart required for General Chat.",
+            },
+            None,
+        )
+    return body, err
+
+
+def _render_conversation(
+    *,
+    chat_key: str,
+    prompt_caption: str,
+    input_placeholder: str,
+    question_handler: Callable[[str], tuple[dict[str, Any] | None, str | None]],
+    show_inline_warnings: bool = True,
+) -> None:
+    if chat_key not in st.session_state:
+        st.session_state[chat_key] = []
+    pending_key = f"{chat_key}_pending_question"
+    pending_question = st.session_state.get(pending_key)
+
+    if pending_question:
+        st.session_state[chat_key].append({"role": "user", "content": pending_question})
+        st.session_state[pending_key] = None
+
+    def _messages_container(height: int = 440):
+        try:
+            return st.container(height=height, border=True)
+        except TypeError:
+            # Older Streamlit versions may not support fixed-height containers.
+            return st.container(border=True)
+
+    with st.container(border=True):
+        header_col1, header_col2 = st.columns([3, 1])
+        header_col1.markdown("### Conversation")
+        header_col1.caption(prompt_caption)
+        if header_col2.button("Clear Chat", key=f"chat_clear_{chat_key}", use_container_width=True):
+            st.session_state[chat_key] = []
+            st.session_state[pending_key] = None
+            st.rerun()
+
+        with _messages_container():
+            for msg in st.session_state[chat_key]:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
+                    if msg["role"] == "assistant":
+                        st.caption(f"Mode: {msg.get('mode', 'unknown')}")
+                        if show_inline_warnings and msg.get("warning"):
+                            st.warning(msg["warning"])
+                        if msg.get("sources"):
+                            with st.expander("Sources", expanded=False):
+                                render_sources(msg.get("sources", []))
+
+            if pending_question:
+                with st.chat_message("assistant"):
+                    thinking_placeholder = st.empty()
+                    thinking_placeholder.markdown("_Thinking..._")
+
+                    body, chat_err = question_handler(pending_question)
+                    assistant_message: dict[str, Any]
+                    if chat_err:
+                        assistant_message = {
+                            "role": "assistant",
+                            "content": f"Chat request failed: {chat_err}",
+                            "sources": [],
+                            "mode": "error",
+                        }
+                    else:
+                        assistant_message = {
+                            "role": "assistant",
+                            "content": str((body or {}).get("answer", "")),
+                            "sources": (body or {}).get("sources", []),
+                            "mode": (body or {}).get("mode", "unknown"),
+                            "warning": (body or {}).get("warning"),
+                        }
+
+                    thinking_placeholder.empty()
+                    response_text = assistant_message.get("content", "")
+                    if response_text:
+                        tokens = re.findall(r"\S+\s*|\n", response_text)
+                        if tokens:
+                            delay = min(0.02, max(0.004, 1.8 / len(tokens)))
+
+                            def _typing_stream():
+                                for token in tokens:
+                                    yield token
+                                    time.sleep(delay)
+
+                            streamed = st.write_stream(_typing_stream())
+                            if isinstance(streamed, str) and streamed.strip():
+                                assistant_message["content"] = streamed
+                        else:
+                            st.markdown(response_text)
+                    else:
+                        st.markdown("No response returned.")
+
+                    st.caption(f"Mode: {assistant_message.get('mode', 'unknown')}")
+                    if show_inline_warnings and assistant_message.get("warning"):
+                        st.warning(assistant_message["warning"])
+                    if assistant_message.get("sources"):
+                        with st.expander("Sources", expanded=False):
+                            render_sources(assistant_message.get("sources", []))
+
+                st.session_state[chat_key].append(assistant_message)
+                st.rerun()
+
+        question = st.chat_input(input_placeholder)
+        if question:
+            st.session_state[pending_key] = question
+            st.rerun()
+
+
+def _render_conversation_waiting(message: str) -> None:
+    with st.container(border=True):
+        st.markdown("### Conversation")
+        st.caption("Case-context chat becomes available after you choose a case on the right.")
+        st.info(message)
+
+
 def main() -> None:
     st.set_page_config(page_title="AI Chatbox", page_icon="💬", layout="wide")
     ensure_state()
     _inject_page_styles()
+
+    st.session_state.setdefault("chat_entry_mode", None)
 
     st.markdown(
         """
         <div class="chat-hero">
             <div class="chat-kicker">Case Assistant</div>
             <h2>AI Chatbox</h2>
-            <p>Ask focused questions about a claim, understand denial reasoning, and get grounded next-step guidance without losing sight of the case context.</p>
+            <p>Choose how you want to chat: use an existing case with context, or ask general questions without case context.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -183,45 +551,31 @@ def main() -> None:
 
     cases, cases_err = fetch_cases()
     health, health_err = fetch_health()
+    cases = cases or []
 
-    top_col1, top_col2 = st.columns([1, 1], gap="large")
-    with top_col1:
-        with st.container(border=True):
-            st.markdown('<p class="section-label">Start Here</p>', unsafe_allow_html=True)
-            st.subheader("Create Case")
-            st.caption("Start a new case if you want to open a fresh chat workspace.")
-            create_case_form(key_prefix="chat")
+    mode = st.session_state.get("chat_entry_mode")
+    if mode not in CHAT_MODES:
+        mode = None
 
-    with top_col2:
-        with st.container(border=True):
-            st.markdown('<p class="section-label">Pick Context</p>', unsafe_allow_html=True)
-            st.subheader("Select Case")
-            st.caption("Choose the case the assistant should use for answers.")
-            if cases_err:
-                st.error(f"Could not load cases: {cases_err}")
-            elif not cases:
-                st.info("No cases found. Create one to begin.")
-            else:
-                select_case(cases, key_prefix="chat", label="Active case")
+    selected_case_id = st.session_state.get("selected_case_id")
+    if selected_case_id and cases and not any(c.get("case_id") == selected_case_id for c in cases):
+        st.session_state["selected_case_id"] = None
+        selected_case_id = None
 
-    if cases_err:
-        st.error(f"Cannot continue without cases API: {cases_err}")
-        st.stop()
-
-    case_id = st.session_state.get("selected_case_id")
     case_payload = None
     payload_err = None
-    if case_id:
-        case_payload, payload_err = fetch_case_payload(case_id)
+
+    chat_ready = False
+    if mode == "general":
+        chat_ready = True
+    elif mode == "select" and selected_case_id and not cases_err:
+        chat_ready = True
 
     with st.sidebar:
         st.markdown("### Status")
-        _render_sidebar_status_item("Available Cases", str(len(cases or [])))
-        _render_sidebar_status_item(
-            "Chat Ready",
-            "Yes" if case_id and not payload_err else "No",
-            tone="good" if case_id and not payload_err else "bad",
-        )
+        _render_sidebar_status_item("Chat Type", _mode_label(mode))
+        _render_sidebar_status_item("Available Cases", str(len(cases)))
+        _render_sidebar_status_item("Chat Ready", "Yes" if chat_ready else "No", tone="good" if chat_ready else "bad")
         if health_err:
             st.error("API/Ollama status unavailable")
         else:
@@ -232,73 +586,84 @@ def main() -> None:
                 tone="good" if health.get("ollama_available") else "bad",
             )
 
-    _render_active_case_header(case_payload, case_id)
-    if not case_id:
-        st.stop()
-    if payload_err or not case_payload:
-        st.error(f"Could not load selected case: {payload_err}")
-        st.stop()
+    if mode is None:
+        _render_mode_choice(cases, cases_err)
+        return
 
-    with st.container(border=True):
-        st.markdown('<p class="section-label">Context</p>', unsafe_allow_html=True)
-        st.subheader("Case Context")
-        extraction = case_payload.get("extraction")
-        if extraction:
-            st.caption(f"Extraction mode: {extraction.get('mode', 'unknown')}")
-            st.json(extraction.get("case_json", {}))
-        else:
-            st.info("No extraction yet. Run extraction from `My Cases` for more grounded responses.")
+    _render_mode_bar(mode)
 
-    chat_key = f"assistant_messages_{case_id}"
-    if chat_key not in st.session_state:
-        st.session_state[chat_key] = []
+    if mode == "select":
+        left_col, right_col = st.columns([2, 1], gap="large")
+        with right_col:
+            with st.container(border=True):
+                st.markdown('<p class="section-label">Select Case</p>', unsafe_allow_html=True)
+                st.subheader("Choose Existing Case")
+                if cases_err:
+                    st.error(f"Could not load cases: {cases_err}")
+                elif not cases:
+                    st.info("No existing cases found yet. Create one in your workspace first.")
+                    if st.button(
+                        "Create Case in Workspace",
+                        icon=":material/add_circle:",
+                        use_container_width=True,
+                        key="chat_select_empty_create_case_btn",
+                    ):
+                        open_case_workspace_create_flow()
+                else:
+                    select_case(cases, key_prefix="chat_select_mode", label="Active case")
+                    if st.button(
+                        "Need a new case? Create in Workspace",
+                        icon=":material/add_circle:",
+                        use_container_width=True,
+                        key="chat_select_create_case_btn",
+                    ):
+                        open_case_workspace_create_flow()
 
-    with st.container(border=True):
-        header_col1, header_col2 = st.columns([3, 1])
-        header_col1.markdown("### Conversation")
-        header_col1.caption("Examples: `Why was my claim denied?` or `Explain this denial in simple terms.`")
-        if header_col2.button("Clear Chat", key=f"chat_clear_{case_id}", use_container_width=True):
-            st.session_state[chat_key] = []
-            st.rerun()
+            selected_case_id = st.session_state.get("selected_case_id")
+            if selected_case_id:
+                case_payload, payload_err = fetch_case_payload(selected_case_id)
 
-        for msg in st.session_state[chat_key]:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
-                if msg["role"] == "assistant":
-                    st.caption(f"Mode: {msg.get('mode', 'unknown')}")
-                    if msg.get("warning"):
-                        st.warning(msg["warning"])
-                    with st.expander("Sources", expanded=False):
-                        render_sources(msg.get("sources", []))
+            if payload_err:
+                st.error(f"Could not load selected case: {payload_err}")
+            _render_active_case_header(case_payload, selected_case_id)
+            if selected_case_id and case_payload and not payload_err:
+                _render_case_context(case_payload)
 
-        question = st.chat_input("Ask about denial reasons, evidence, policy context, and next steps...")
-        if question:
-            st.session_state[chat_key].append({"role": "user", "content": question})
-            body, chat_err = safe_call(
-                api_post,
-                f"/cases/{case_id}/chat",
-                json_body={"question": question},
+        with left_col:
+            selected_case_id = st.session_state.get("selected_case_id")
+            if cases_err:
+                _render_conversation_waiting("Case data is unavailable right now.")
+                return
+            if not cases:
+                _render_conversation_waiting("No existing cases found. Create one in Case Workspace to begin.")
+                return
+            if not selected_case_id:
+                _render_conversation_waiting("Choose an existing case on the right to begin chatting.")
+                return
+            if payload_err or not case_payload:
+                _render_conversation_waiting("We couldn't load the selected case yet.")
+                return
+            _render_conversation(
+                chat_key=f"assistant_messages_case_{selected_case_id}",
+                prompt_caption="Examples: `Summarize this denial.` or `What should I do next?`",
+                input_placeholder="Ask about denial reasons, evidence, policy context, and next steps...",
+                question_handler=lambda q: _ask_case_question(selected_case_id, q),
             )
-            if chat_err:
-                st.session_state[chat_key].append(
-                    {
-                        "role": "assistant",
-                        "content": f"Chat request failed: {chat_err}",
-                        "sources": [],
-                        "mode": "error",
-                    }
-                )
-            else:
-                st.session_state[chat_key].append(
-                    {
-                        "role": "assistant",
-                        "content": str(body.get("answer", "")),
-                        "sources": body.get("sources", []),
-                        "mode": body.get("mode", "unknown"),
-                        "warning": body.get("warning"),
-                    }
-                )
-            st.rerun()
+        return
+
+    # mode == "general"
+    with st.container(border=True):
+        st.markdown('<p class="section-label">General Chat</p>', unsafe_allow_html=True)
+        st.subheader("General Appeal Guidance")
+        st.warning("This is general guidance without case-specific context. Create or select a case for personalized appeal support.")
+
+    _render_conversation(
+        chat_key="assistant_messages_general",
+        prompt_caption="Examples: `How do appeals usually work?` or `What documents are commonly needed?`",
+        input_placeholder="Ask a general question about denied-claim appeals...",
+        question_handler=_ask_general_question,
+        show_inline_warnings=False,
+    )
 
 
 if __name__ == "__main__":

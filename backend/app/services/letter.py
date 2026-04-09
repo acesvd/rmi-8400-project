@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+from datetime import datetime, timezone
 from typing import Any
 
 from ..config import ARTIFACT_DIR, OLLAMA_LETTER_MODEL
@@ -22,55 +24,144 @@ def _short(text: str, n: int = 220) -> str:
     return text[:n] + ("..." if len(text) > n else "")
 
 
+def _reason_label(raw: str) -> str:
+    return str(raw or "unknown").replace("_", " ").replace("-", " ").strip().title()
+
+
+def _reason_default_quote(label: str) -> str:
+    normalized = str(label or "").strip().lower()
+    defaults = {
+        "medical_necessity": "The payer determined the requested service did not meet medical necessity criteria.",
+        "prior_authorization": "The payer indicated prior authorization requirements were not met.",
+        "coding_billing": "The payer cited coding or documentation issues affecting claim adjudication.",
+        "administrative": "The payer cited administrative criteria as the basis for denial.",
+        "out_of_network": "The payer indicated network coverage constraints for the requested service.",
+    }
+    return defaults.get(normalized, "The payer identified this issue as part of the denial rationale.")
+
+
+def _looks_low_quality_letter(text: str) -> bool:
+    content = (text or "").strip()
+    if len(content.split()) < 110:
+        return True
+
+    lower = content.lower()
+    placeholder_markers = [
+        "[your name]",
+        "[your title]",
+        "[your organization]",
+        "lorem ipsum",
+        "citation markers",
+    ]
+    if any(marker in lower for marker in placeholder_markers):
+        return True
+
+    # Markdown-heavy outputs typically look poor when converted to PDF for demos.
+    if content.count("**") >= 4 or re.search(r"(?m)^#{1,6}\s", content):
+        return True
+
+    return False
+
+
+def _collect_supporting_docs(citations: list[dict[str, Any]], reasons: list[dict[str, Any]]) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for reason in reasons:
+        citation = reason.get("citation") or {}
+        name = str(citation.get("file_name") or "").strip()
+        if name and name not in seen:
+            ordered.append(name)
+            seen.add(name)
+    for c in citations:
+        name = str(c.get("file_name") or "").strip()
+        if name and name not in seen:
+            ordered.append(name)
+            seen.add(name)
+    return ordered
+
+
 def _build_letter_template(case_row: dict[str, Any], extraction: dict[str, Any], citations: list[dict[str, Any]], style: str) -> str:
     case_json = extraction.get("case_json") or {}
     ids = case_json.get("identifiers") or {}
     parties = case_json.get("parties") or {}
     reasons = case_json.get("denial_reasons") or []
+    deadlines = case_json.get("deadlines") or []
     payer = case_json.get("payer", "unknown")
-    patient_name = parties.get("patient_name", "unknown")
+    patient_name = parties.get("patient_name", "the member")
+    claimant_name = parties.get("claimant_name") or patient_name
+    claim_number = ids.get("claim_number", "unknown")
+    member_id = ids.get("member_id", "unknown")
+    auth_number = ids.get("auth_number", "unknown")
+    deadline_values = [str(d.get("value") or "").strip() for d in deadlines if str(d.get("value") or "").strip()]
+    deadline_text = ", ".join(deadline_values) if deadline_values else "not specified in extracted data"
+    today = datetime.now(timezone.utc).strftime("%B %d, %Y")
 
-    tone_line = "This is a concise appeal summary." if style == "concise" else "This appeal requests full reconsideration based on supporting documentation."
-
-    reason_lines = []
+    reason_lines: list[str] = []
     for reason in reasons:
         citation = reason.get("citation") or {}
         ref = f"{citation.get('file_name', 'document')} p.{citation.get('page_number', '?')}"
-        reason_lines.append(f"- {reason.get('label', 'unknown').replace('_', ' ').title()}: {reason.get('supporting_quote', '')} ({ref})")
+        raw_quote = str(reason.get("supporting_quote") or "").strip()
+        quote = _short(raw_quote, 320) if raw_quote else _reason_default_quote(str(reason.get("label") or ""))
+        if len(quote) < 32:
+            quote = _reason_default_quote(str(reason.get("label") or ""))
+        reason_lines.append(f"- {_reason_label(reason.get('label', 'unknown'))}: {quote} ({ref})")
 
     if not reason_lines:
         reason_lines.append("- Denial reason was not confidently extracted; manual review requested.")
 
-    evidence_lines = []
-    for i, c in enumerate(citations, start=1):
-        evidence_lines.append(
-            f"{i}. {_short(c.get('text', ''))} ({c.get('file_name', 'document')} p.{c.get('page_number', '?')})"
-        )
+    doc_names = _collect_supporting_docs(citations, reasons)
+    if not doc_names:
+        doc_names = ["No supporting documents were identified from retrieval."]
+
+    concise_paragraph = (
+        "This appeal requests prompt reconsideration of the denial based on the submitted records "
+        "and the plan's medical necessity and authorization criteria."
+    )
+    formal_paragraph = (
+        "I am writing to formally appeal the denial of the above claim and request full reconsideration. "
+        "Based on the denial notice and submitted clinical information, we believe the determination should "
+        "be reversed and the requested service approved."
+    )
 
     body = [
-        "# Appeal Letter Draft",
+        "Formal Claim Appeal Letter",
         "",
+        f"Date: {today}",
+        "To: Appeals Department",
+        str(payer),
+        "",
+        "Re: Request for Reconsideration of Claim Denial",
         f"Case ID: {case_row['case_id']}",
+        f"Claim Number: {claim_number}",
+        f"Member ID: {member_id}",
+        f"Authorization Number: {auth_number}",
         f"Patient: {patient_name}",
-        f"Payer: {payer}",
-        f"Claim #: {ids.get('claim_number', 'unknown')}",
-        f"Auth #: {ids.get('auth_number', 'unknown')}",
+        f"Claimant: {claimant_name}",
         "",
-        "To Whom It May Concern,",
+        "Appeals Department,",
         "",
-        tone_line,
+        concise_paragraph if style == "concise" else formal_paragraph,
         "",
-        "## Basis for Appeal",
+        "Denial Basis Cited:",
         *reason_lines,
         "",
-        "## Requested Action",
-        "Please overturn the denial and reprocess the claim based on the attached documentation.",
+        "Requested Resolution:",
+        "- Overturn the denial and approve the requested service.",
+        "- Reprocess the related claim promptly based on the complete submitted record.",
+        "- Provide a written determination and rationale after reconsideration.",
         "",
-        "## Supporting Evidence",
-        *(evidence_lines or ["No retrieval evidence available; manual evidence review required."]),
+        "Supporting Documentation Submitted:",
+        *[f"- {name}" for name in doc_names],
+        "",
+        f"Appeal Deadline (extracted): {deadline_text}.",
+        "",
+        "Thank you for your review and prompt attention to this appeal.",
         "",
         "Sincerely,",
-        "Appeals Support System",
+        str(claimant_name),
+        "Generated with ClaimRight appeal support tools",
+        "",
+        "Disclaimer: This draft is informational support and not legal or medical advice.",
     ]
 
     return "\n".join(body)
@@ -97,20 +188,38 @@ def _build_letter_llm(
         for c in citations
     ]
 
+    case_json = extraction.get("case_json") or {}
+    ids = case_json.get("identifiers") or {}
+    parties = case_json.get("parties") or {}
+    reasons = case_json.get("denial_reasons") or []
+    brief_reasons = [
+        {
+            "label": r.get("label"),
+            "supporting_quote": _short(str(r.get("supporting_quote") or ""), 260),
+            "citation": r.get("citation"),
+        }
+        for r in reasons[:5]
+    ]
+
     system_prompt = (
         "You are an insurance claims appeal drafting assistant. "
-        "Write a professional appeal letter in markdown using only supplied case data and evidence. "
+        "Write a realistic, professional appeal letter in plain text (NOT markdown). "
         "Do not invent facts. If missing, explicitly state unknown. "
-        "Keep tone neutral and respectful. Include citation markers inline like '(file_name p.X)'. "
-        "Add one-line disclaimer: informational support, not legal/medical advice."
+        "Keep tone neutral and respectful. Include source markers inline like '(file_name p.X)'. "
+        "Do not include placeholders such as [Your Name], [Your Title], or template instructions. "
+        "Use this structure: heading/date, addressee, case identifiers, appeal narrative, "
+        "denial basis bullets, requested resolution bullets, supporting documents, signature, disclaimer."
     )
 
     user_prompt = (
         f"Draft style: {style}\n"
         f"Case:\n{dump_json({'case_id': case_row.get('case_id'), 'title': case_row.get('title')})}\n\n"
-        f"Extraction:\n{dump_json(extraction.get('case_json') or {})}\n\n"
+        f"Key identifiers:\n{dump_json(ids)}\n\n"
+        f"Parties:\n{dump_json(parties)}\n\n"
+        f"Payer:\n{dump_json({'payer': case_json.get('payer', 'unknown')})}\n\n"
+        f"Denial reasons:\n{dump_json(brief_reasons)}\n\n"
         f"Evidence:\n{dump_json(evidence)}\n\n"
-        "Return markdown only."
+        "Return plain text only."
     )
 
     return client.chat(
@@ -138,6 +247,7 @@ def generate_letter_artifact(conn, *, case_id: str, style: str = "formal") -> di
 
     generation_mode = "template_fallback"
     llm_error = None
+    letter_md = ""
     try:
         letter_md = _build_letter_llm(
             case_row=dict(case_row),
@@ -147,6 +257,8 @@ def generate_letter_artifact(conn, *, case_id: str, style: str = "formal") -> di
         )
         if not letter_md.strip():
             raise RuntimeError("Empty LLM response")
+        if _looks_low_quality_letter(letter_md):
+            raise RuntimeError("LLM letter failed quality checks")
         generation_mode = "ollama"
     except Exception as exc:
         llm_error = str(exc)

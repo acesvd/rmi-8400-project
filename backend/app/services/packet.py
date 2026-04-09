@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -20,18 +22,71 @@ def _next_version(conn, *, case_id: str, artifact_type: str) -> int:
     return int(row["v"] or 0) + 1
 
 
+def _wrap_line_for_pdf(line: str, width_chars: int = 95) -> list[str]:
+    clean = line.rstrip()
+    if not clean:
+        return [""]
+    return textwrap.wrap(
+        clean,
+        width=width_chars,
+        break_long_words=False,
+        break_on_hyphens=False,
+    ) or [clean]
+
+
+def _normalize_markdown_for_pdf(text: str) -> list[str]:
+    out: list[str] = []
+    for raw_line in (text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            if out and out[-1] != "":
+                out.append("")
+            continue
+
+        # Skip markdown-only separator lines.
+        if re.fullmatch(r"[-=*#\s]{3,}", line):
+            continue
+
+        # Demote headings and preserve a blank line before major sections.
+        line = re.sub(r"^\s{0,3}#{1,6}\s*", "", line)
+
+        # Normalize bullets/numbered list into simple bullets.
+        line = re.sub(r"^\s*\d+\.\s+", "- ", line)
+        line = re.sub(r"^\s*[*+-]\s+", "- ", line)
+
+        # Remove common markdown emphasis markers.
+        line = line.replace("**", "").replace("__", "").replace("`", "")
+        line = re.sub(r"\[(.*?)\]\((.*?)\)", r"\1 (\2)", line)
+        line = re.sub(r"\s{2,}", " ", line).strip()
+
+        if line:
+            out.append(line)
+
+    if not out:
+        return ["No letter content was available."]
+    return out
+
+
 def _write_text_pdf(path: Path, lines: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     c = canvas.Canvas(str(path), pagesize=LETTER)
     width, height = LETTER
+    left_margin = 50
+    top_margin = 50
+    bottom_margin = 50
+    line_height = 14
 
-    y = height - 50
+    c.setFont("Helvetica", 11)
+    y = height - top_margin
     for line in lines:
-        if y < 50:
-            c.showPage()
-            y = height - 50
-        c.drawString(50, y, line[:120])
-        y -= 14
+        wrapped_lines = _wrap_line_for_pdf(line)
+        for chunk in wrapped_lines:
+            if y < bottom_margin:
+                c.showPage()
+                c.setFont("Helvetica", 11)
+                y = height - top_margin
+            c.drawString(left_margin, y, chunk)
+            y -= line_height
     c.save()
 
 
@@ -100,8 +155,8 @@ def generate_packet_artifact(conn, *, case_id: str, include_uploaded_pdfs: bool 
         cover_lines.append(f"{idx}. {d['filename']} ({d['type']})")
     _write_text_pdf(cover_pdf, cover_lines)
 
-    letter_md = Path(letter["storage_path"]).read_text(encoding="utf-8")
-    _write_text_pdf(letter_pdf, [line for line in letter_md.splitlines() if line.strip() != ""])
+    letter_text = Path(letter["storage_path"]).read_text(encoding="utf-8")
+    _write_text_pdf(letter_pdf, _normalize_markdown_for_pdf(letter_text))
 
     writer = PdfWriter()
 

@@ -1,7 +1,10 @@
-"""A-Score Dashboard — dark theme matching the existing app aesthetic."""
+"""A-Score Dashboard."""
 
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 from typing import Any
 
 import streamlit as st
@@ -13,52 +16,115 @@ def _inject_styles() -> None:
     st.markdown(
         """
         <style>
-        /* --- Page-level dark override --- */
-        .stApp { background-color: #0e1117; }
-
         .ascore-hero {
             padding: 1.2rem 1.4rem; border-radius: 20px;
             background:
-                radial-gradient(circle at top right, rgba(247,196,82,0.22), transparent 40%),
-                linear-gradient(135deg, #12343b 0%, #1f5c57 55%, #ecb64f 100%);
-            color: #f7f4ea; margin-bottom: 1.2rem;
-            box-shadow: 0 12px 28px rgba(0,0,0,0.35);
+                radial-gradient(circle at 8% 12%, rgba(255, 208, 136, 0.32), transparent 35%),
+                radial-gradient(circle at 97% -8%, rgba(236, 196, 95, 0.3), transparent 33%),
+                radial-gradient(circle at 72% 88%, rgba(160, 209, 186, 0.22), transparent 42%),
+                linear-gradient(125deg, #fffdf8 0%, #f3f7ef 52%, #e6f0df 100%);
+            color: #233224; margin-bottom: 1.2rem;
+            border: 1px solid #d8d4bf;
+            box-shadow: 0 16px 32px rgba(58, 64, 39, 0.16);
+            position: relative;
+            overflow: hidden;
+        }
+        .ascore-hero::before {
+            content: "";
+            position: absolute;
+            width: 240px;
+            height: 240px;
+            top: -122px;
+            right: -94px;
+            border-radius: 999px;
+            background: rgba(236, 196, 95, 0.28);
+        }
+        .ascore-hero::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background:
+                radial-gradient(circle, rgba(142, 113, 31, 0.09) 1.05px, transparent 1.2px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0) 46%);
+            background-size: 18px 18px, 100% 100%;
+            opacity: 0.35;
+            pointer-events: none;
+            mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.35) 0%, rgba(0, 0, 0, 0) 72%);
+        }
+        .ascore-hero > * {
+            position: relative;
+            z-index: 1;
         }
         .ascore-hero-kicker {
             text-transform: uppercase; letter-spacing: 0.12em;
-            font-size: 0.7rem; opacity: 0.8;
+            font-size: 0.7rem; color: #76611f;
         }
-        .ascore-hero h2 { margin: 0.15rem 0 0; font-size: 1.7rem; color: #fff; }
-        .ascore-hero p { margin: 0.4rem 0 0; font-size: 0.88rem; color: rgba(255,255,255,0.8); }
+        .ascore-hero h2 { margin: 0.15rem 0 0; font-size: 1.7rem; color: #233224; }
+        .ascore-hero p { margin: 0.4rem 0 0; font-size: 0.88rem; color: #52634f; }
 
         .section-label {
             text-transform: uppercase; letter-spacing: 0.12em;
             font-size: 0.72rem; font-weight: 700;
-            color: #8a9bae; margin-bottom: 0.5rem;
+            color: color-mix(in srgb, currentColor 58%, transparent);
+            margin-bottom: 0.5rem;
         }
 
         /* --- Your Case boxes --- */
         .your-case-box {
             padding: 0.6rem 0.9rem; border-radius: 12px;
-            background: #1a2332; border: 1px solid #2a3a4a;
+            background: linear-gradient(
+                180deg,
+                color-mix(in srgb, currentColor 5%, transparent) 0%,
+                color-mix(in srgb, currentColor 7%, transparent) 100%
+            );
+            border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
             margin-bottom: 0.5rem;
         }
         .your-case-label {
             font-size: 0.68rem; text-transform: uppercase;
-            letter-spacing: 0.1em; font-weight: 700; color: #7a8fa3;
+            letter-spacing: 0.1em; font-weight: 700;
+            color: color-mix(in srgb, currentColor 58%, transparent);
         }
         .your-case-value {
-            font-size: 0.92rem; color: #e8ecf1; font-weight: 600; margin-top: 0.1rem;
+            font-size: 0.92rem; color: inherit; font-weight: 600; margin-top: 0.1rem;
         }
 
         /* --- Score cards --- */
         .score-card {
             text-align: center; padding: 1.3rem 1rem;
-            border-radius: 16px; border: 2px solid #333;
-            margin-bottom: 0.7rem; background: #141c24;
+            border-radius: 16px; border: 2px solid color-mix(in srgb, currentColor 22%, transparent);
+            margin-bottom: 0.7rem;
+            background: linear-gradient(
+                180deg,
+                color-mix(in srgb, currentColor 5%, transparent) 0%,
+                color-mix(in srgb, currentColor 7%, transparent) 100%
+            );
+            color: inherit;
         }
         .score-big { font-size: 2.5rem; font-weight: 800; line-height: 1.1; }
-        .score-sub { font-size: 0.84rem; color: #9aaab8; margin-top: 0.25rem; }
+        .score-sub {
+            font-size: 0.84rem;
+            color: color-mix(in srgb, currentColor 58%, transparent);
+            margin-top: 0.25rem;
+        }
+        .score-subtitle {
+            font-size: 0.82rem;
+            color: color-mix(in srgb, currentColor 60%, transparent);
+            margin-bottom: 0.5rem;
+        }
+        .score-source {
+            font-size: 0.78rem;
+            color: color-mix(in srgb, currentColor 60%, transparent);
+            margin-bottom: 0.4rem;
+        }
+        .score-assessment {
+            margin-top: 0.5rem;
+            font-size: 0.86rem;
+            line-height: 1.55;
+            color: color-mix(in srgb, currentColor 86%, transparent);
+            text-align: left;
+            padding: 0 0.3rem;
+        }
 
         .conf-pill {
             display: inline-block; padding: 2px 12px; border-radius: 14px;
@@ -72,30 +138,66 @@ def _inject_styles() -> None:
         .outcome-pill {
             display: inline-block; padding: 3px 12px; border-radius: 14px;
             font-size: 0.82rem; font-weight: 600;
+            border: 1px solid transparent;
         }
-        .outcome-overturned { background: #133929; color: #5ce0a0; }
-        .outcome-upheld     { background: #3b1518; color: #f5a0a0; }
+        .outcome-overturned {
+            background: color-mix(in srgb, #22a06b 24%, transparent);
+            color: color-mix(in srgb, #22a06b 64%, currentColor 36%);
+            border-color: color-mix(in srgb, #22a06b 45%, transparent);
+        }
+        .outcome-upheld {
+            background: color-mix(in srgb, #dc3545 24%, transparent);
+            color: color-mix(in srgb, #dc3545 64%, currentColor 36%);
+            border-color: color-mix(in srgb, #dc3545 44%, transparent);
+        }
 
-        .case-card-header { font-size: 1.02rem; font-weight: 700; color: #e0e6ec; }
-        .case-card-meta   { font-size: 0.86rem; color: #8a9bae; }
+        .case-card-header { font-size: 1.02rem; font-weight: 700; color: inherit; }
+        .case-card-meta {
+            font-size: 0.86rem;
+            color: color-mix(in srgb, currentColor 60%, transparent);
+        }
+        .case-meta-label {
+            color: color-mix(in srgb, currentColor 74%, transparent);
+        }
         .case-card-finding {
-            font-size: 0.86rem; color: #b0bec5; padding: 0.3rem 0; line-height: 1.5;
+            font-size: 0.86rem;
+            color: color-mix(in srgb, currentColor 86%, transparent);
+            padding: 0.3rem 0;
+            line-height: 1.5;
         }
 
         .agent-comment {
-            font-size: 0.86rem; color: #b8f0d4;
-            background: #12332a; border-left: 3px solid #22a06b;
+            font-size: 0.86rem;
+            color: color-mix(in srgb, currentColor 86%, transparent);
+            background: color-mix(in srgb, currentColor 9%, transparent);
+            border-left: 3px solid color-mix(in srgb, var(--primary-color, #1f6aa9) 55%, currentColor 45%);
             padding: 0.45rem 0.8rem; border-radius: 8px;
             margin: 0.35rem 0; line-height: 1.45;
         }
-        .agent-comment b, .agent-comment strong { color: #7ef0b8; }
+        .agent-comment b, .agent-comment strong {
+            color: color-mix(in srgb, var(--primary-color, #1f6aa9) 78%, currentColor 22%);
+        }
 
         /* --- Recommendations --- */
         .rec-box {
             padding: 0.55rem 0.85rem; border-radius: 10px;
-            background: #12332a; border-left: 4px solid #22a06b;
-            margin-bottom: 0.45rem; font-size: 0.86rem; color: #c8e6d8;
+            background: color-mix(in srgb, currentColor 9%, transparent);
+            border-left: 4px solid color-mix(in srgb, var(--primary-color, #1f6aa9) 55%, currentColor 45%);
+            margin-bottom: 0.45rem;
+            font-size: 0.86rem;
+            color: color-mix(in srgb, currentColor 86%, transparent);
         }
+        .kw-chip {
+            display: inline-block;
+            padding: 2px 10px;
+            margin: 2px;
+            border-radius: 10px;
+            background: color-mix(in srgb, currentColor 10%, transparent);
+            color: inherit;
+            font-size: 0.8rem;
+            border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+        }
+
         </style>
         """,
         unsafe_allow_html=True,
@@ -106,10 +208,69 @@ def _inject_styles() -> None:
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _count_by(items: list[dict[str, Any]], key: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in items:
+        value = str(item.get(key) or "unknown")
+        counts[value] = counts.get(value, 0) + 1
+    return counts
+
+
+def _latest_value(items: list[dict[str, Any]], key: str) -> str:
+    values = [str(item.get(key)) for item in items if item.get(key)]
+    return max(values) if values else ""
+
+
+def _case_payload_fingerprint(case_payload: dict[str, Any]) -> str:
+    case = case_payload.get("case") or {}
+    extraction = case_payload.get("extraction") or {}
+    documents = case_payload.get("documents") or []
+    tasks = case_payload.get("tasks") or []
+    artifacts = case_payload.get("artifacts") or []
+    events = case_payload.get("events") or []
+
+    projection = {
+        "case": {
+            "case_id": case.get("case_id"),
+            "status": case.get("status"),
+            "title": case.get("title"),
+            "updated_at": case.get("updated_at"),
+        },
+        "extraction": {
+            "extraction_id": extraction.get("extraction_id"),
+            "created_at": extraction.get("created_at"),
+            "mode": extraction.get("mode"),
+            "warnings_count": len(extraction.get("warnings") or []),
+        },
+        "documents": {
+            "count": len(documents),
+            "latest_uploaded_at": _latest_value(documents, "uploaded_at"),
+            "status_counts": _count_by(documents, "processed_status"),
+        },
+        "tasks": {
+            "count": len(tasks),
+            "latest_created_at": _latest_value(tasks, "created_at"),
+            "status_counts": _count_by(tasks, "status"),
+        },
+        "artifacts": {
+            "count": len(artifacts),
+            "latest_created_at": _latest_value(artifacts, "created_at"),
+            "type_counts": _count_by(artifacts, "type"),
+        },
+        "events": {
+            "count": len(events),
+            "latest_timestamp": _latest_value(events, "timestamp"),
+            "type_counts": _count_by(events, "type"),
+        },
+    }
+    canonical = json.dumps(projection, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def _score_color(rate: float | None) -> str:
     if rate is None:
         return "#6b7684"
-    if rate >= 0.6:
+    if rate >= 0.7:
         return "#5ce0a0"
     if rate >= 0.4:
         return "#f0c050"
@@ -124,7 +285,7 @@ def _strength(rate: float | None) -> str:
     if rate is None:
         return "Insufficient data"
     pct = int(rate * 100)
-    if pct >= 60:
+    if pct >= 70:
         return "Strong"
     if pct >= 40:
         return "Moderate"
@@ -168,16 +329,16 @@ def _generate_comparison(user_diag: str, user_treat: str, pc: dict[str, Any]) ->
 
     parts = []
     if similarities:
-        parts.append(f"**Similarities:** This case shares {'; '.join(similarities)} with your denial.")
+        parts.append(f"<strong>Similarities:</strong> This case shares {'; '.join(similarities)} with your denial.")
     else:
         parts.append("This case involves a different condition but the same denial type (medical necessity).")
 
     if differences:
-        parts.append(f"**Differences:** {'; '.join(differences)}.")
+        parts.append(f"<strong>Differences:</strong> {'; '.join(differences)}.")
 
     if is_overturned:
         parts.append(
-            "The independent reviewer **overturned** the insurer's denial in this case."
+            "The independent reviewer <strong>overturned</strong> the insurer's denial in this case."
         )
         # Extract a reason from the description if available
         if "medically necessary" in desc.lower() or "appropriate" in desc.lower():
@@ -190,7 +351,7 @@ def _generate_comparison(user_diag: str, user_treat: str, pc: dict[str, Any]) ->
                 "The reviewer's reasoning in this case may provide useful arguments for your own appeal."
             )
     else:
-        parts.append("The insurer's denial was **upheld** in this case.")
+        parts.append("The insurer's denial was <strong>upheld</strong> in this case.")
         parts.append(
             "Understanding why this appeal failed can help you avoid similar weaknesses "
             "in your own submission."
@@ -209,6 +370,8 @@ def _render_score_card(
     conf_html = ""
     if confidence:
         conf_html = (
+            '<span class="score-sub" style="font-size:0.82rem;margin-right:0.35rem">'
+            'Confidence:</span>'
             f'<span class="conf-pill {_conf_class(confidence)}">'
             f'{confidence.replace("_", " ").title()}</span>'
         )
@@ -217,7 +380,7 @@ def _render_score_card(
     st.markdown(
         f'<div class="score-card" style="border-color:{color}44">'
         f'<div class="section-label">{title}</div>'
-        f'<div style="font-size:0.82rem;color:#8a9bae;margin-bottom:0.5rem">{subtitle}</div>'
+        f'<div class="score-subtitle">{subtitle}</div>'
         f'<div class="score-big" style="color:{color}">{pct}</div>'
         f'<div class="score-sub" style="font-size:0.95rem;font-weight:600;color:{color}">'
         f'{strength}</div>'
@@ -247,10 +410,22 @@ def _highlight_shared_words(text: str, query: str) -> str:
     def _replacer(match: re.Match) -> str:
         word = match.group(0)
         if word.lower() in query_words:
-            return f'<mark style="background:#2a5a3a;color:#7ef0b8;padding:0 2px;border-radius:3px">{word}</mark>'
+            return (
+                f'<mark style="background:color-mix(in srgb,var(--primary-color,#1f6aa9) 18%,transparent);'
+                f'color:inherit;padding:0 2px;border-radius:3px">{word}</mark>'
+            )
         return word
 
     return re.sub(r"[a-zA-Z]{4,}", _replacer, text)
+
+
+def _strip_case_summary_prefix(text: str) -> str:
+    return re.sub(
+        r"^\s*Nature\s+of\s+Statutory\s+Criteria\s*/\s*Case\s+Summary\s*:\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
 
 
 def _render_case_card(i: int, pc: dict[str, Any], user_diag: str, user_treat: str, query_text: str = "") -> None:
@@ -283,9 +458,9 @@ def _render_case_card(i: int, pc: dict[str, Any], user_diag: str, user_treat: st
 
         st.markdown(
             f'<span class="case-card-meta">'
-            f'<b style="color:#c0cdd8">Condition:</b> {diag} '
+            f'<b class="case-meta-label">Condition:</b> {diag} '
             f'&nbsp;·&nbsp; '
-            f'<b style="color:#c0cdd8">Treatment:</b> {treat}'
+            f'<b class="case-meta-label">Treatment:</b> {treat}'
             f'</span>',
             unsafe_allow_html=True,
         )
@@ -293,13 +468,15 @@ def _render_case_card(i: int, pc: dict[str, Any], user_diag: str, user_treat: st
         comparison = _generate_comparison(user_diag, user_treat, pc)
         st.markdown(f'<div class="agent-comment">🤖 {comparison}</div>', unsafe_allow_html=True)
 
-        # Full findings text with highlighted words — NO cap
+        # Keep long statutory/case-summary text collapsed by default for cleaner cards.
         if desc:
-            highlighted = _highlight_shared_words(desc, query_text)
-            st.markdown(
-                f'<div class="case-card-finding">{highlighted}</div>',
-                unsafe_allow_html=True,
-            )
+            clean_desc = _strip_case_summary_prefix(desc)
+            highlighted = _highlight_shared_words(clean_desc, query_text)
+            with st.expander("View Nature of Statutory Criteria / Case Summary", expanded=False):
+                st.markdown(
+                    f'<div class="case-card-finding">{highlighted}</div>',
+                    unsafe_allow_html=True,
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -347,14 +524,52 @@ def main() -> None:
         st.warning("No extraction available. Upload a denial letter → Process → Extract first.")
         st.stop()
 
-    with st.spinner("Computing appealability score..."):
-        appeal_data, appeal_err = fetch_appealability(case_id)
+    case_fingerprint = _case_payload_fingerprint(case_payload)
+    cache_by_case = st.session_state.setdefault("ascore_cache_by_case", {})
+    cached_entry = cache_by_case.get(case_id)
+    cache_valid = (
+        isinstance(cached_entry, dict)
+        and cached_entry.get("fingerprint") == case_fingerprint
+        and isinstance(cached_entry.get("appeal_data"), dict)
+    )
 
-    if appeal_err:
-        st.error(f"Appealability computation failed: {appeal_err}")
-        st.stop()
-    if not appeal_data:
-        st.info("No appealability data available for this case.")
+    left_action, right_action = st.columns([1, 3], gap="small")
+    with left_action:
+        button_label = "Compute A-Score" if not cache_valid else "Recompute A-Score"
+        compute_clicked = st.button(
+            button_label,
+            icon=":material/play_arrow:",
+            use_container_width=True,
+            key=f"ascore_compute_btn_{case_id}",
+        )
+    with right_action:
+        if cache_valid:
+            st.caption("Showing cached results for this case. Click recompute if you want a fresh run.")
+        elif isinstance(cached_entry, dict):
+            st.caption("Case data changed since last run. Click compute to refresh scores.")
+        else:
+            st.caption("Select a case and click Compute A-Score to run the analysis.")
+
+    appeal_data = None
+    if compute_clicked:
+        with st.spinner("Computing appealability score..."):
+            appeal_data, appeal_err = fetch_appealability(case_id)
+
+        if appeal_err:
+            st.error(f"Appealability computation failed: {appeal_err}")
+            st.stop()
+        if not appeal_data:
+            st.info("No appealability data available for this case.")
+            st.stop()
+
+        cache_by_case[case_id] = {
+            "fingerprint": case_fingerprint,
+            "appeal_data": appeal_data,
+        }
+    elif cache_valid:
+        appeal_data = cached_entry["appeal_data"]
+    else:
+        st.info("Ready to run. Click `Compute A-Score` to generate this case's analysis.")
         st.stop()
 
     # Unpack
@@ -382,6 +597,73 @@ def main() -> None:
 
     # --- LEFT ---
     with left_col:
+        st.markdown('<p class="section-label">Appeal Scores</p>', unsafe_allow_html=True)
+
+        if classification == "R1":
+            rate = a_score.get("overturn_rate")
+            n = a_score.get("sample_size", 0)
+            conf = a_score.get("confidence", "none")
+            yr = a_score.get("year_range", "")
+
+            _render_score_card(
+                "A-Score",
+                "Historical IMR overturn rate",
+                rate,
+                [f"{n:,} similar cases · {yr}"],
+                confidence=conf,
+            )
+
+            if agent_score:
+                raw_ag_score = agent_score.get("score")
+                ag_sc: int | None = None
+                if isinstance(raw_ag_score, (int, float)):
+                    ag_sc = int(raw_ag_score)
+                elif isinstance(raw_ag_score, str):
+                    try:
+                        ag_sc = int(float(raw_ag_score))
+                    except ValueError:
+                        ag_sc = None
+                if ag_sc is not None:
+                    ag_sc = max(0, min(100, ag_sc))
+                ag_rate = (ag_sc / 100.0) if ag_sc is not None else None
+                ag_str = _strength(ag_rate)
+                ag_assess = agent_score.get("assessment", "")
+                ag_source = agent_score.get("source", "")
+                ag_color = _score_color(ag_rate)
+                ag_score_text = f"{ag_sc}%" if ag_sc is not None else "—"
+
+                source_label = "🤖 Ollama" if ag_source == "ollama" else "📊 Rule-based"
+
+                st.markdown(
+                    f'<div class="score-card" style="border-color:{ag_color}44">'
+                    f'<div class="section-label">AI-Score</div>'
+                    f'<div class="score-source">{source_label}</div>'
+                    f'<div class="score-big" style="color:{ag_color}">{ag_score_text}</div>'
+                    f'<div class="score-sub" style="font-size:0.95rem;font-weight:600;'
+                    f'color:{ag_color}">{ag_str}</div>'
+                    f'<div class="score-assessment">{ag_assess}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+        elif classification == "R2":
+            int_pct = benchmark.get("internal_overturn_pct")
+            ext_pct = benchmark.get("external_overturn_pct")
+            if int_pct is not None:
+                _render_score_card("Internal Appeal Rate", payer, int_pct / 100,
+                                   [f"Year: {benchmark.get('year', 'N/A')}"])
+            if ext_pct is not None:
+                _render_score_card("External Review Rate", payer, ext_pct / 100,
+                                   [f"Year: {benchmark.get('year', 'N/A')}"])
+
+        non_prec_recs = [r for r in recs if not r.startswith("Precedent case ")]
+        if non_prec_recs:
+            st.markdown("---")
+            st.markdown('<p class="section-label">Recommendations</p>', unsafe_allow_html=True)
+            for r in non_prec_recs:
+                st.markdown(f'<div class="rec-box">{r}</div>', unsafe_allow_html=True)
+
+        st.markdown("---")
         st.markdown('<p class="section-label">Your Case</p>', unsafe_allow_html=True)
 
         for label, value in [
@@ -411,9 +693,7 @@ def main() -> None:
 
         if medical_keywords:
             kw_html = " ".join(
-                f'<span style="display:inline-block;padding:2px 10px;margin:2px;'
-                f'border-radius:10px;background:#1a3328;color:#7ef0b8;'
-                f'font-size:0.8rem;border:1px solid #2a5a3a">{kw}</span>'
+                f'<span class="kw-chip">{kw}</span>'
                 for kw in medical_keywords
             )
             st.markdown(
@@ -423,64 +703,6 @@ def main() -> None:
                 f'</div>',
                 unsafe_allow_html=True,
             )
-
-        st.markdown("---")
-        st.markdown('<p class="section-label">Appeal Scores</p>', unsafe_allow_html=True)
-
-        if classification == "R1":
-            rate = a_score.get("overturn_rate")
-            n = a_score.get("sample_size", 0)
-            conf = a_score.get("confidence", "none")
-            yr = a_score.get("year_range", "")
-
-            _render_score_card(
-                "A-Score",
-                "Historical IMR overturn rate",
-                rate,
-                [f"{n:,} similar cases · {yr}"],
-                confidence=conf,
-            )
-
-            if agent_score:
-                ag_sc = agent_score.get("score", 0)
-                ag_str = agent_score.get("strength", "unknown")
-                ag_assess = agent_score.get("assessment", "")
-                ag_source = agent_score.get("source", "")
-                ag_color = _score_color(ag_sc / 100 if ag_sc else None)
-
-                source_label = "🤖 Ollama" if ag_source == "ollama" else "📊 Rule-based"
-
-                st.markdown(
-                    f'<div class="score-card" style="border-color:{ag_color}44">'
-                    f'<div class="section-label">AI-Score</div>'
-                    f'<div style="font-size:0.78rem;color:#8a9bae;margin-bottom:0.4rem">'
-                    f'{source_label}</div>'
-                    f'<div class="score-big" style="color:{ag_color}">{ag_sc}%</div>'
-                    f'<div class="score-sub" style="font-size:0.95rem;font-weight:600;'
-                    f'color:{ag_color}">{ag_str.title()}</div>'
-                    f'<div style="margin-top:0.5rem;font-size:0.86rem;'
-                    f'line-height:1.55;color:#b0bec5;text-align:left;padding:0 0.3rem">'
-                    f'{ag_assess}</div>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-
-        elif classification == "R2":
-            int_pct = benchmark.get("internal_overturn_pct")
-            ext_pct = benchmark.get("external_overturn_pct")
-            if int_pct is not None:
-                _render_score_card("Internal Appeal Rate", payer, int_pct / 100,
-                                   [f"Year: {benchmark.get('year', 'N/A')}"])
-            if ext_pct is not None:
-                _render_score_card("External Review Rate", payer, ext_pct / 100,
-                                   [f"Year: {benchmark.get('year', 'N/A')}"])
-
-        non_prec_recs = [r for r in recs if not r.startswith("Precedent case ")]
-        if non_prec_recs:
-            st.markdown("---")
-            st.markdown('<p class="section-label">Recommendations</p>', unsafe_allow_html=True)
-            for r in non_prec_recs:
-                st.markdown(f'<div class="rec-box">{r}</div>', unsafe_allow_html=True)
 
     # --- RIGHT ---
     with right_col:
