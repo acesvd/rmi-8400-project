@@ -124,7 +124,7 @@ def _inject_styles() -> None:
         }
         .about-subtitle {
             margin: 0.74rem 0 0;
-            color: color-mix(in srgb, var(--text-color, currentColor) 78%, transparent);
+            color: #415c71;
             max-width: 52rem;
             font: 500 1rem/1.6 "Manrope", "Avenir Next", "Segoe UI", sans-serif;
             position: relative;
@@ -432,11 +432,13 @@ def _inject_styles() -> None:
             background: linear-gradient(180deg, rgba(23, 60, 56, 0.82) 0%, rgba(16, 48, 44, 0.86) 100%);
             box-shadow: 0 10px 20px rgba(0, 0, 0, 0.28);
         }
-        [data-theme="dark"] .about-subtitle,
         [data-theme="dark"] .section-lead,
         [data-theme="dark"] .body-copy,
         [data-theme="dark"] .trust-note {
             color: #d8ece6 !important;
+        }
+        [data-theme="dark"] .about-subtitle {
+            color: #415c71 !important;
         }
         [data-theme="dark"] .icon-chip {
             color: #9fe3d6;
