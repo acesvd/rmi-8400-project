@@ -185,6 +185,34 @@ def main() -> None:
         div[data-testid="stAppViewBlockContainer"],
         div[data-testid="stMainBlockContainer"] {
             padding-top: 3rem !important;
+            padding-bottom: 0.55rem !important;
+        }
+
+        .cr-global-footer {
+            text-align: center;
+            font-size: 0.68rem;
+            letter-spacing: 0.06em;
+            line-height: 1.2;
+            margin-top: 0.8rem;
+            padding: 0.45rem 0.75rem 0.35rem;
+            color: color-mix(in srgb, var(--text-color, #334155) 68%, transparent);
+            border-top: 1px solid color-mix(in srgb, var(--text-color, #334155) 18%, transparent);
+            background: transparent;
+        }
+        .cr-global-footer-note {
+            display: block;
+            margin-top: 0.2rem;
+            font-size: 0.62rem;
+            letter-spacing: 0.04em;
+            color: color-mix(in srgb, var(--text-color, #334155) 56%, transparent);
+        }
+        [data-theme="dark"] .cr-global-footer {
+            color: rgba(202, 219, 237, 0.86);
+            border-top-color: rgba(148, 181, 214, 0.34);
+            background: transparent;
+        }
+        [data-theme="dark"] .cr-global-footer-note {
+            color: rgba(185, 207, 229, 0.72);
         }
 
         @media (max-width: 768px) {
@@ -206,6 +234,7 @@ def main() -> None:
             div[data-testid="stAppViewBlockContainer"],
             div[data-testid="stMainBlockContainer"] {
                 padding-top: 2rem !important;
+                padding-bottom: 0.45rem !important;
             }
         }
         </style>
@@ -262,6 +291,15 @@ def main() -> None:
         position="top",
     )
     navigation.run()
+    st.markdown(
+        """
+        <div class="cr-global-footer">
+            RMI 8400 - Spring 2026 - Group 4
+            <span class="cr-global-footer-note">Developed for Educational Purposes Only. Not a Real Service.</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 if __name__ == "__main__":
