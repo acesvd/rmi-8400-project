@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from html import escape
 from pathlib import Path
 
 import streamlit as st
@@ -290,16 +291,108 @@ def _inject_styles() -> None:
         .snapshot-list li {
             margin: 0.33rem 0;
         }
-        .roadmap-pill {
-            margin: 0 0 0.38rem;
-            display: inline-block;
+        .roadmap-journey {
+            margin-top: 0.5rem;
+            margin-bottom: 0.2rem;
+        }
+        .roadmap-road {
+            position: relative;
+            height: 24px;
             border-radius: 999px;
-            padding: 0.12rem 0.5rem;
-            background: color-mix(in srgb, var(--cr-accent) 22%, white 78%);
-            color: color-mix(in srgb, var(--cr-accent) 80%, var(--text-color, #0f2237) 20%);
-            font: 800 0.69rem/1.2 "Manrope", "Avenir Next", "Segoe UI", sans-serif;
-            letter-spacing: 0.05em;
+            background: linear-gradient(90deg, #173846 0%, #1b4555 54%, #225a63 100%);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 9px 18px rgba(19, 55, 73, 0.28);
+            margin: 0 6% -0.55rem;
+            transform: translateY(20px);
+        }
+        .roadmap-road::after {
+            content: "";
+            position: absolute;
+            left: 4%;
+            right: 4%;
+            top: 50%;
+            transform: translateY(-50%);
+            height: 4px;
+            border-radius: 999px;
+            background:
+                repeating-linear-gradient(
+                    90deg,
+                    rgba(236, 248, 246, 0.95) 0 12px,
+                    rgba(236, 248, 246, 0) 12px 24px
+                );
+            opacity: 0.85;
+        }
+        .roadmap-grid {
+            position: relative;
+            z-index: 1;
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 1rem;
+            align-items: start;
+        }
+        .roadmap-step {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-top: -20px;
+        }
+        .roadmap-pin {
+            width: 60px;
+            height: 60px;
+            border-radius: 999px;
+            border: 4px solid var(--pin-color, var(--cr-accent));
+            background: linear-gradient(
+                180deg,
+                color-mix(in srgb, var(--pin-color, var(--cr-accent)) 10%, white 90%),
+                color-mix(in srgb, var(--pin-color, var(--cr-accent)) 20%, white 80%)
+            );
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font: 800 1.48rem/1 "Fraunces", Georgia, serif;
+            color: color-mix(in srgb, var(--pin-color, var(--cr-accent)) 82%, #123347 18%);
+            box-shadow: 0 7px 14px color-mix(in srgb, var(--pin-color, var(--cr-accent)) 30%, transparent);
+            position: relative;
+            margin: 0;
+        }
+        .roadmap-pin::after {
+            content: "";
+            position: absolute;
+            left: 50%;
+            bottom: -9px;
+            width: 14px;
+            height: 14px;
+            transform: translateX(-50%) rotate(45deg);
+            background: color-mix(in srgb, var(--pin-color, var(--cr-accent)) 22%, white 78%);
+            border-right: 3px solid var(--pin-color, var(--cr-accent));
+            border-bottom: 3px solid var(--pin-color, var(--cr-accent));
+        }
+        .roadmap-node {
+            margin: 1.1rem 0 0.48rem;
+            padding: 0.12rem 0.58rem;
+            border-radius: 999px;
+            border: 1px solid color-mix(in srgb, var(--pin-color, var(--cr-accent)) 44%, transparent);
+            background: color-mix(in srgb, var(--pin-color, var(--cr-accent)) 16%, white 84%);
+            color: color-mix(in srgb, var(--pin-color, var(--cr-accent)) 82%, #18354a 18%);
+            font: 800 0.72rem/1.2 "Manrope", "Avenir Next", "Segoe UI", sans-serif;
+            letter-spacing: 0.08em;
             text-transform: uppercase;
+        }
+        .roadmap-step-card {
+            width: 100%;
+            border-radius: 14px;
+            border: 1px solid color-mix(in srgb, var(--pin-color, var(--cr-accent)) 48%, var(--cr-border) 52%);
+            padding: 0.9rem 0.92rem;
+            background: linear-gradient(
+                180deg,
+                color-mix(in srgb, var(--cr-surface) 78%, white 22%),
+                color-mix(in srgb, var(--cr-surface-soft) 92%, white 8%)
+            );
+            box-shadow: 0 10px 18px color-mix(in srgb, var(--cr-card-shadow) 52%, transparent);
+        }
+        .roadmap-copy {
+            margin: 0;
+            color: var(--cr-ink-soft);
+            font: 500 0.9rem/1.56 "Manrope", "Avenir Next", "Segoe UI", sans-serif;
         }
         .trust-note {
             border-left: 3px solid color-mix(in srgb, var(--cr-accent) 86%, transparent);
@@ -362,9 +455,28 @@ def _inject_styles() -> None:
         [data-theme="dark"] .about-glance-label {
             color: #9fe3d6;
         }
-        [data-theme="dark"] .roadmap-pill {
-            background: rgba(47, 143, 132, 0.32);
-            color: #d6f2eb;
+        [data-theme="dark"] .roadmap-road {
+            background: linear-gradient(90deg, #0f2a33 0%, #133641 58%, #1a4652 100%);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 10px 20px rgba(0, 0, 0, 0.34);
+        }
+        [data-theme="dark"] .roadmap-road::after {
+            background:
+                repeating-linear-gradient(
+                    90deg,
+                    rgba(232, 244, 241, 0.88) 0 12px,
+                    rgba(232, 244, 241, 0) 12px 24px
+                );
+        }
+        [data-theme="dark"] .roadmap-node {
+            background: color-mix(in srgb, var(--pin-color, var(--cr-accent)) 24%, rgba(19, 43, 53, 0.88));
+            color: #e2f4ee;
+        }
+        [data-theme="dark"] .roadmap-step-card {
+            background: linear-gradient(180deg, rgba(20, 48, 45, 0.82), rgba(16, 40, 38, 0.88));
+            border-color: color-mix(in srgb, var(--pin-color, var(--cr-accent)) 46%, rgba(112, 167, 155, 0.46));
+        }
+        [data-theme="dark"] .roadmap-copy {
+            color: #d8ece6;
         }
         [data-theme="dark"] .section-divider {
             background: linear-gradient(90deg,
@@ -381,6 +493,23 @@ def _inject_styles() -> None:
             }
             .block-gap {
                 height: 0.35rem;
+            }
+            .roadmap-road {
+                display: none;
+            }
+            .roadmap-grid {
+                grid-template-columns: 1fr;
+                gap: 0.8rem;
+            }
+            .roadmap-step {
+                align-items: stretch;
+                margin-top: 0;
+            }
+            .roadmap-pin {
+                margin: 0 auto;
+            }
+            .roadmap-node {
+                align-self: center;
             }
         }
         @media (max-width: 640px) {
@@ -740,18 +869,31 @@ def main() -> None:
             "Measuring longitudinal outcomes and building feedback loops that improve recommendations across conditions and payer rules.",
         ),
     ]
+    roadmap_pin_colors = ["#2cb59c", "#f39c3d", "#62a8eb"]
+    st.markdown(
+        """
+        <div class="roadmap-journey">
+            <div class="roadmap-road" aria-hidden="true"></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     roadmap_cols = st.columns(3, gap="large")
-    for col, (phase, copy) in zip(roadmap_cols, roadmap):
+    for idx, (col, (phase, copy)) in enumerate(zip(roadmap_cols, roadmap)):
         with col:
+            pin_color = roadmap_pin_colors[idx % len(roadmap_pin_colors)]
             st.markdown(
                 f"""
-                <div class="about-card">
-                    <p class="roadmap-pill">{phase}</p>
-                    <p class="about-card-copy">{copy}</p>
+                <div class="roadmap-step">
+                    <div class="roadmap-pin" style="--pin-color: {pin_color};">{idx + 1}</div>
+                    <p class="roadmap-node" style="--pin-color: {pin_color};">{escape(phase)}</p>
+                    <div class="roadmap-step-card" style="--pin-color: {pin_color};">
+                        <p class="roadmap-copy">{escape(copy)}</p>
+                    </div>
                 </div>
                 """,
-            unsafe_allow_html=True,
-        )
+                unsafe_allow_html=True,
+            )
 
     is_authenticated = bool(st.session_state.get("is_authenticated"))
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)

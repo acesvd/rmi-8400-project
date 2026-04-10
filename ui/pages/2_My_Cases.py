@@ -3,9 +3,18 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from html import escape
 
+import pandas as pd
 import streamlit as st
 
-from lib.api import ensure_state, fetch_case_payload, fetch_cases, open_case_workspace_create_flow, select_case
+from lib.api import (
+    api_patch,
+    ensure_state,
+    fetch_case_payload,
+    fetch_cases,
+    open_case_workspace_create_flow,
+    safe_call,
+    select_case,
+)
 
 
 def _inject_page_styles() -> None:
@@ -978,16 +987,91 @@ def _render_task_summary_box(case_payload: dict | None) -> None:
         col2.metric("Waiting", str(waiting))
         col3.metric("Done", str(done))
 
-        preview = [
-            {
-                "title": task.get("title"),
-                "status": task.get("status"),
-                "owner": task.get("owner"),
-                "due_date": task.get("due_date") or "n/a",
-            }
-            for task in tasks[:6]
-        ]
-        st.dataframe(preview, use_container_width=True, hide_index=True)
+        case = case_payload.get("case") or {}
+        case_id = str(case.get("case_id") or "")
+        if not case_id:
+            st.info("Task check-off is unavailable until the case is loaded.")
+            return
+
+        st.caption("Use the status dropdown to update tasks directly from this table.")
+
+        task_rows: list[dict[str, str]] = []
+        status_by_task_id: dict[str, str] = {}
+        for task in tasks:
+            task_id = str(task.get("task_id") or "").strip()
+            if not task_id:
+                continue
+
+            status = _normalize_status(task.get("status"))
+            if status not in {"todo", "waiting", "done"}:
+                status = "todo"
+
+            status_by_task_id[task_id] = status
+            task_rows.append(
+                {
+                    "task_id": task_id,
+                    "title": str(task.get("title") or "Untitled task"),
+                    "status": status,
+                    "owner": str(task.get("owner") or "unassigned"),
+                    "due_date": str(task.get("due_date") or "n/a"),
+                }
+            )
+
+        if not task_rows:
+            st.info("No editable tasks found for this case.")
+            return
+
+        task_df = pd.DataFrame(task_rows)
+        edited_df = st.data_editor(
+            task_df,
+            use_container_width=True,
+            hide_index=True,
+            key=f"mycases_task_editor_{case_id}",
+            column_config={
+                "task_id": None,
+                "title": st.column_config.TextColumn("title", width="large"),
+                "status": st.column_config.SelectboxColumn(
+                    "status",
+                    options=["todo", "waiting", "done"],
+                    required=True,
+                    help="Update task status from the dashboard.",
+                ),
+                "owner": st.column_config.TextColumn("owner", width="medium"),
+                "due_date": st.column_config.TextColumn("due_date", width="small"),
+            },
+            disabled=["title", "owner", "due_date"],
+        )
+
+        if isinstance(edited_df, pd.DataFrame):
+            changes: list[tuple[str, str, str]] = []
+            for row in edited_df.to_dict(orient="records"):
+                task_id = str(row.get("task_id") or "").strip()
+                if not task_id:
+                    continue
+                old_status = status_by_task_id.get(task_id)
+                new_status = _normalize_status(row.get("status"))
+                if old_status and new_status in {"todo", "waiting", "done"} and new_status != old_status:
+                    changes.append((task_id, str(row.get("title") or "task"), new_status))
+
+            if changes:
+                failures: list[str] = []
+                for task_id, task_title, new_status in changes:
+                    _, update_err = safe_call(
+                        api_patch,
+                        f"/cases/{case_id}/tasks/{task_id}",
+                        json_body={"status": new_status},
+                    )
+                    if update_err:
+                        failures.append(f"{task_title}: {update_err}")
+
+                if failures:
+                    st.error("Could not update one or more tasks.")
+                    for failure in failures[:3]:
+                        st.caption(failure)
+                    return
+
+                st.success(f"Updated {len(changes)} task status{'es' if len(changes) != 1 else ''}.")
+                st.rerun()
 
 
 def _render_workspace_shortcuts_box(*, compact: bool = False) -> None:

@@ -180,6 +180,15 @@ def main() -> None:
         """,
         unsafe_allow_html=True,
     )
+    nav_spacer, nav_col = st.columns([4, 1.3], gap="small")
+    with nav_col:
+        if st.button(
+            "Back to Dashboard",
+            icon=":material/dashboard:",
+            key="case_library_back_dashboard_btn",
+            use_container_width=True,
+        ):
+            st.switch_page("pages/2_My_Cases.py")
 
     cases, cases_err = fetch_cases()
     if cases_err:

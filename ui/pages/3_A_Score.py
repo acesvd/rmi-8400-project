@@ -499,6 +499,15 @@ def main() -> None:
         """,
         unsafe_allow_html=True,
     )
+    nav_spacer, nav_col = st.columns([4, 1.3], gap="small")
+    with nav_col:
+        if st.button(
+            "Back to Dashboard",
+            icon=":material/dashboard:",
+            key="ascore_back_dashboard_btn",
+            use_container_width=True,
+        ):
+            st.switch_page("pages/2_My_Cases.py")
 
     cases, cases_err = fetch_cases()
     if cases_err:
@@ -508,7 +517,9 @@ def main() -> None:
         st.info("No cases yet. Create one from the My Cases page first.")
         st.stop()
 
-    select_case(cases, key_prefix="ascore", label="Select case to analyze")
+    selector_col, compute_col = st.columns([5, 1.6], gap="small")
+    with selector_col:
+        select_case(cases, key_prefix="ascore", label="Select case to analyze")
     case_id = st.session_state.get("selected_case_id")
     if not case_id:
         st.info("Select a case above to see its appealability analysis.")
@@ -533,8 +544,9 @@ def main() -> None:
         and isinstance(cached_entry.get("appeal_data"), dict)
     )
 
-    left_action, right_action = st.columns([1, 3], gap="small")
-    with left_action:
+    with compute_col:
+        # Align with the selectbox input row while keeping the selector label visible.
+        st.markdown("<div style='height:1.68rem;'></div>", unsafe_allow_html=True)
         button_label = "Compute A-Score" if not cache_valid else "Recompute A-Score"
         compute_clicked = st.button(
             button_label,
@@ -542,13 +554,13 @@ def main() -> None:
             use_container_width=True,
             key=f"ascore_compute_btn_{case_id}",
         )
-    with right_action:
-        if cache_valid:
-            st.caption("Showing cached results for this case. Click recompute if you want a fresh run.")
-        elif isinstance(cached_entry, dict):
-            st.caption("Case data changed since last run. Click compute to refresh scores.")
-        else:
-            st.caption("Select a case and click Compute A-Score to run the analysis.")
+
+    if cache_valid:
+        st.caption("Showing cached results for this case. Click recompute if you want a fresh run.")
+    elif isinstance(cached_entry, dict):
+        st.caption("Case data changed since last run. Click compute to refresh scores.")
+    else:
+        st.caption("Select a case and click Compute A-Score to run the analysis.")
 
     appeal_data = None
     if compute_clicked:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from html import escape
 import re
 
 import streamlit as st
@@ -15,23 +16,32 @@ from lib.api import (
     select_case,
 )
 from lib.components import (
-    render_case_actions_panel,
     render_documents,
     render_event_form,
     render_overview,
     render_packet,
+    render_upload_documents_card,
     render_tasks,
     render_tracking_table,
+    render_workflow_actions_card,
 )
 
 WORKSPACE_FLOW_KEY = "case_workspace_flow"
 WORKSPACE_PENDING_TITLE_KEY = "case_workspace_pending_title"
+WORKSPACE_DETAIL_SECTION_KEY = "case_workspace_detail_section"
+WORKSPACE_DETAIL_SECTION_PENDING_KEY = "case_workspace_detail_section_pending"
+WORKSPACE_DETAIL_SECTIONS = ["Overview", "Documents", "Tasks", "Packet Builder", "Tracking"]
 
 
 def _inject_page_styles() -> None:
     st.markdown(
         """
         <style>
+        .stMainBlockContainer {
+            background:
+                radial-gradient(circle at 4% 6%, rgba(111, 184, 255, 0.08), transparent 28%),
+                radial-gradient(circle at 96% 11%, rgba(118, 211, 179, 0.09), transparent 30%);
+        }
         .workspace-hero {
             padding: 1.35rem 1.45rem;
             border-radius: 24px;
@@ -125,25 +135,243 @@ def _inject_page_styles() -> None:
             color: #16623f;
             border-color: #9fd5b7;
         }
-        .active-case-shell {
-            padding: 1rem 1.1rem;
-            border-radius: 18px;
-            border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
-            background: linear-gradient(
-                180deg,
-                color-mix(in srgb, currentColor 6%, transparent) 0%,
-                color-mix(in srgb, currentColor 9%, transparent) 100%
-            );
-        }
-        .active-case-title {
-            font-size: 1.28rem;
+        .workspace-select-title {
+            margin: 0.08rem 0 0.18rem;
+            font-size: 1.54rem;
+            line-height: 1.15;
             font-weight: 800;
-            margin: 0.12rem 0 0.35rem;
             color: inherit;
         }
-        .active-case-copy {
-            margin-bottom: 0.25rem;
-            color: color-mix(in srgb, currentColor 86%, transparent);
+        .workspace-select-help {
+            margin: 0.08rem 0 0.6rem;
+            font-size: 0.93rem;
+            line-height: 1.52;
+            color: color-mix(in srgb, currentColor 78%, transparent);
+        }
+        .workspace-selector-ribbon {
+            height: 8px;
+            border-radius: 999px;
+            margin: 0.28rem 0 0.8rem;
+            background:
+                linear-gradient(90deg, #7ddfc2 0%, #78c7ec 46%, #9cb2ff 100%);
+            box-shadow: 0 10px 24px rgba(57, 129, 179, 0.28);
+        }
+        .workspace-selector-metrics {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.58rem;
+            margin: 0.15rem 0 0.75rem;
+        }
+        .workspace-selector-metric {
+            padding: 0.56rem 0.64rem;
+            border-radius: 12px;
+            border: 1px solid #b8d8ea;
+            background:
+                radial-gradient(circle at 86% 12%, rgba(123, 183, 246, 0.18), transparent 36%),
+                linear-gradient(140deg, #f5fbff 0%, #edf8f4 50%, #e9f1ff 100%);
+            box-shadow: 0 8px 18px rgba(24, 68, 105, 0.1);
+        }
+        .workspace-selector-metric-kicker {
+            margin: 0;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-size: 0.62rem;
+            font-weight: 800;
+            color: #3473a2;
+        }
+        .workspace-selector-metric-value {
+            margin: 0.16rem 0 0;
+            font-size: 1.15rem;
+            line-height: 1.15;
+            font-weight: 800;
+            color: #183f63;
+        }
+        .workspace-selector-tip {
+            margin: 0.1rem 0 0.62rem;
+            padding: 0.48rem 0.64rem;
+            border-radius: 11px;
+            border: 1px solid #b8d8ea;
+            background: linear-gradient(135deg, rgba(110, 183, 232, 0.14), rgba(129, 217, 185, 0.12));
+            color: #2f5678;
+            font-size: 0.82rem;
+            line-height: 1.35;
+        }
+        .workspace-case-highlight {
+            margin-top: 0.55rem;
+            margin-bottom: 0.9rem;
+            padding: 0.86rem 0.92rem;
+            border-radius: 15px;
+            border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+            background: linear-gradient(
+                180deg,
+                color-mix(in srgb, currentColor 5%, transparent) 0%,
+                color-mix(in srgb, currentColor 10%, transparent) 100%
+            );
+            box-shadow: 0 10px 18px rgba(17, 53, 43, 0.12);
+        }
+        .workspace-case-kicker {
+            margin: 0;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-size: 0.68rem;
+            font-weight: 800;
+            color: color-mix(in srgb, currentColor 72%, transparent);
+        }
+        .workspace-quick-actions-wrap {
+            padding: 0.58rem 0.65rem 0.2rem;
+            border-radius: 14px;
+            border: 1px solid #b9d7e8;
+            background:
+                radial-gradient(circle at 85% 12%, rgba(134, 197, 247, 0.16), transparent 34%),
+                linear-gradient(145deg, #f3fbff 0%, #eef8f3 54%, #ecf3ff 100%);
+            box-shadow: 0 10px 22px rgba(24, 67, 103, 0.12);
+        }
+        .workspace-quick-actions-title {
+            margin: 0 0 0.48rem;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            font-size: 0.68rem;
+            font-weight: 800;
+            color: #316c98;
+        }
+        .workspace-case-title {
+            margin: 0.28rem 0 0.34rem;
+            font-size: 1.13rem;
+            line-height: 1.2;
+            font-weight: 800;
+            color: inherit;
+        }
+        .workspace-case-meta {
+            margin: 0.24rem 0 0;
+            font-size: 0.88rem;
+            line-height: 1.45;
+            color: color-mix(in srgb, currentColor 80%, transparent);
+        }
+        .workspace-glance-strip {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.62rem;
+            margin: 0.7rem 0 0.9rem;
+        }
+        .workspace-glance-card {
+            border-radius: 14px;
+            padding: 0.62rem 0.74rem;
+            border: 1px solid #b9d4e7;
+            background:
+                radial-gradient(circle at 85% 10%, rgba(110, 176, 255, 0.15), transparent 36%),
+                linear-gradient(140deg, #f4f9ff 0%, #e8f5f0 56%, #e9f1ff 100%);
+            box-shadow: 0 8px 18px rgba(27, 72, 110, 0.09);
+        }
+        .workspace-glance-kicker {
+            margin: 0;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-size: 0.66rem;
+            font-weight: 800;
+            color: #2a688f;
+            opacity: 0.9;
+        }
+        .workspace-glance-value {
+            margin: 0.22rem 0 0.02rem;
+            font-size: 1.14rem;
+            font-weight: 800;
+            color: #173d5f;
+            line-height: 1.2;
+        }
+        .workspace-glance-note {
+            margin: 0;
+            font-size: 0.79rem;
+            line-height: 1.35;
+            color: #3f6483;
+            opacity: 0.9;
+        }
+        .workspace-accent-rail {
+            height: 7px;
+            border-radius: 999px;
+            margin: 0.08rem 0 0.8rem;
+            background:
+                linear-gradient(90deg, #66d6b5 0%, #5fb9ea 48%, #8ca2ff 100%);
+            box-shadow: 0 8px 18px rgba(70, 130, 183, 0.22);
+        }
+        .workspace-block-gap {
+            height: 0.65rem;
+        }
+        @media (max-width: 980px) {
+            .workspace-glance-strip {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+            .workspace-selector-metrics {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+        @media (max-width: 620px) {
+            .workspace-glance-strip {
+                grid-template-columns: 1fr;
+            }
+            .workspace-selector-metrics {
+                grid-template-columns: 1fr;
+            }
+        }
+        [data-theme="dark"] .workspace-select-help,
+        [data-theme="dark"] .workspace-case-meta {
+            color: rgba(230, 244, 236, 0.82);
+        }
+        [data-theme="dark"] .workspace-selector-ribbon {
+            background: linear-gradient(90deg, #2f9f80 0%, #2f82b6 46%, #6278d9 100%);
+            box-shadow: 0 10px 24px rgba(14, 42, 69, 0.5);
+        }
+        [data-theme="dark"] .workspace-selector-metric {
+            border-color: rgba(132, 176, 215, 0.55);
+            background:
+                radial-gradient(circle at 86% 10%, rgba(92, 146, 224, 0.3), transparent 35%),
+                linear-gradient(145deg, rgba(18, 44, 68, 0.9), rgba(15, 55, 48, 0.9) 54%, rgba(29, 40, 76, 0.92));
+            box-shadow: 0 12px 25px rgba(0, 0, 0, 0.32);
+        }
+        [data-theme="dark"] .workspace-selector-metric-kicker {
+            color: rgba(169, 214, 250, 0.93);
+        }
+        [data-theme="dark"] .workspace-selector-metric-value {
+            color: rgba(233, 246, 255, 0.98);
+        }
+        [data-theme="dark"] .workspace-selector-tip {
+            border-color: rgba(129, 173, 212, 0.52);
+            background: linear-gradient(135deg, rgba(66, 124, 175, 0.3), rgba(52, 137, 108, 0.24));
+            color: rgba(214, 234, 249, 0.95);
+        }
+        [data-theme="dark"] .workspace-quick-actions-wrap {
+            border-color: rgba(134, 177, 215, 0.56);
+            background:
+                radial-gradient(circle at 85% 12%, rgba(81, 136, 212, 0.29), transparent 34%),
+                linear-gradient(145deg, rgba(18, 45, 69, 0.92), rgba(16, 56, 49, 0.9) 54%, rgba(29, 40, 76, 0.92));
+            box-shadow: 0 12px 24px rgba(0, 0, 0, 0.34);
+        }
+        [data-theme="dark"] .workspace-quick-actions-title {
+            color: rgba(166, 212, 248, 0.95);
+        }
+        [data-theme="dark"] .workspace-glance-card {
+            border-color: rgba(128, 174, 220, 0.5);
+            background:
+                radial-gradient(circle at 85% 12%, rgba(88, 148, 229, 0.25), transparent 34%),
+                linear-gradient(140deg, rgba(20, 45, 70, 0.9) 0%, rgba(17, 56, 47, 0.9) 52%, rgba(33, 43, 78, 0.9) 100%);
+            box-shadow: 0 12px 26px rgba(0, 0, 0, 0.34);
+        }
+        [data-theme="dark"] .workspace-glance-kicker {
+            color: rgba(165, 216, 255, 0.94);
+        }
+        [data-theme="dark"] .workspace-glance-value {
+            color: rgba(233, 246, 255, 0.98);
+        }
+        [data-theme="dark"] .workspace-glance-note {
+            color: rgba(196, 223, 244, 0.92);
+        }
+        [data-theme="dark"] .workspace-accent-rail {
+            background: linear-gradient(90deg, #2f9f80 0%, #2f82b6 48%, #5c76d6 100%);
+            box-shadow: 0 8px 18px rgba(20, 55, 89, 0.45);
+        }
+        [data-theme="dark"] .workspace-case-highlight {
+            border-color: rgba(141, 188, 168, 0.46);
+            background: linear-gradient(180deg, rgba(22, 56, 46, 0.84), rgba(16, 42, 35, 0.9));
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.35);
         }
         </style>
         """,
@@ -160,11 +388,54 @@ def _status_class(status: str | None) -> str:
     return "status-open"
 
 
+def _render_workspace_glance_strip(case_payload: dict) -> None:
+    documents = case_payload.get("documents") if isinstance(case_payload.get("documents"), list) else []
+    tasks = case_payload.get("tasks") if isinstance(case_payload.get("tasks"), list) else []
+    artifacts = case_payload.get("artifacts") if isinstance(case_payload.get("artifacts"), list) else []
+    extraction = case_payload.get("extraction") if isinstance(case_payload.get("extraction"), dict) else None
+
+    done_tasks = sum(1 for task in tasks if str(task.get("status") or "").strip().lower() == "done")
+    packet_count = sum(1 for artifact in artifacts if artifact.get("type") == "packet_pdf")
+    letter_count = sum(1 for artifact in artifacts if artifact.get("type") == "letter")
+    extraction_mode = str(extraction.get("mode") or "pending") if extraction else "pending"
+
+    st.markdown(
+        f"""
+        <div class="workspace-glance-strip">
+            <div class="workspace-glance-card">
+                <p class="workspace-glance-kicker">Documents</p>
+                <p class="workspace-glance-value">{len(documents)}</p>
+                <p class="workspace-glance-note">Files in workspace</p>
+            </div>
+            <div class="workspace-glance-card">
+                <p class="workspace-glance-kicker">Tasks</p>
+                <p class="workspace-glance-value">{done_tasks}/{len(tasks) if tasks else 0}</p>
+                <p class="workspace-glance-note">Completed checklist</p>
+            </div>
+            <div class="workspace-glance-card">
+                <p class="workspace-glance-kicker">Extraction</p>
+                <p class="workspace-glance-value">{escape(extraction_mode.replace('_', ' ').title())}</p>
+                <p class="workspace-glance-note">Current case context mode</p>
+            </div>
+            <div class="workspace-glance-card">
+                <p class="workspace-glance-kicker">Outputs</p>
+                <p class="workspace-glance-value">{letter_count} Letters · {packet_count} Packets</p>
+                <p class="workspace-glance-note">Generated artifacts</p>
+            </div>
+        </div>
+        <div class="workspace-accent-rail"></div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def _ensure_workspace_flow_state() -> None:
     if WORKSPACE_FLOW_KEY not in st.session_state:
         st.session_state[WORKSPACE_FLOW_KEY] = "entry"
     if WORKSPACE_PENDING_TITLE_KEY not in st.session_state:
         st.session_state[WORKSPACE_PENDING_TITLE_KEY] = ""
+    if WORKSPACE_DETAIL_SECTION_KEY not in st.session_state:
+        st.session_state[WORKSPACE_DETAIL_SECTION_KEY] = "Overview"
 
 
 def _clear_pending_create_title() -> None:
@@ -244,34 +515,6 @@ def _upload_document_to_case(
     }
     _, upload_err = safe_call(api_post, f"/cases/{case_id}/documents", files=files, data=data)
     return upload_err
-
-
-def _render_selected_case_header(case_payload: dict | None, case_id: str | None) -> None:
-    if not case_id:
-        st.markdown('<p class="section-label">Selected Case</p>', unsafe_allow_html=True)
-        st.info("Choose a case to continue.")
-        return
-
-    case = (case_payload or {}).get("case", {})
-    documents = len((case_payload or {}).get("documents", []))
-    tasks = len((case_payload or {}).get("tasks", []))
-    status = case.get("status", "open")
-    pill = _status_class(status)
-
-    st.markdown(
-        f"""
-        <div class="active-case-shell">
-            <div class="section-label">Selected Case</div>
-            <div class="active-case-title">{case.get('title', 'Untitled Case')}</div>
-            <div class="active-case-copy">
-                <span class="status-pill {pill}">{status}</span>
-                &nbsp;&nbsp;Case ID: <strong>{case_id}</strong>
-            </div>
-            <div class="active-case-copy">Documents: <strong>{documents}</strong> | Tasks: <strong>{tasks}</strong></div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
 
 def _render_entry_screen(cases: list[dict]) -> None:
@@ -576,40 +819,58 @@ def _render_create_case_setup(cases: list[dict]) -> None:
 
 
 def _render_workspace_content(case_id: str, case_payload: dict) -> None:
-    _render_selected_case_header(case_payload, case_id)
+    requested_section = st.session_state.pop(WORKSPACE_DETAIL_SECTION_PENDING_KEY, None)
+    if requested_section in WORKSPACE_DETAIL_SECTIONS:
+        st.session_state[WORKSPACE_DETAIL_SECTION_KEY] = requested_section
+    if st.session_state.get(WORKSPACE_DETAIL_SECTION_KEY) not in WORKSPACE_DETAIL_SECTIONS:
+        st.session_state[WORKSPACE_DETAIL_SECTION_KEY] = "Overview"
 
-    with st.container(border=True):
-        render_case_actions_panel(case_id, key_prefix="case_workspace")
+    case_detail_col, workflow_col = st.columns([2, 1], gap="large")
 
-    st.divider()
-    st.markdown('<p class="section-label">Case Detail</p>', unsafe_allow_html=True)
-    st.markdown(f"### Workspace for `{case_id}`")
+    with case_detail_col:
+        st.markdown('<p class="section-label">Case Detail</p>', unsafe_allow_html=True)
+        st.markdown(f"### Workspace for `{case_id}`")
+        _render_workspace_glance_strip(case_payload)
+        selected_section = st.segmented_control(
+            "Case detail section",
+            WORKSPACE_DETAIL_SECTIONS,
+            key=WORKSPACE_DETAIL_SECTION_KEY,
+            label_visibility="collapsed",
+        )
+        selected_section = str(selected_section or st.session_state.get(WORKSPACE_DETAIL_SECTION_KEY) or "Overview")
 
-    tab_overview, tab_documents, tab_tasks, tab_packet, tab_tracking = st.tabs(
-        ["Overview", "Documents", "Tasks", "Packet Builder", "Tracking"]
-    )
+        if selected_section == "Overview":
+            render_overview(case_payload)
 
-    with tab_overview:
-        render_overview(case_payload)
+        elif selected_section == "Documents":
+            render_upload_documents_card(case_id, key_prefix="case_workspace")
+            st.markdown('<div class="workspace-block-gap"></div>', unsafe_allow_html=True)
+            render_documents(case_payload)
 
-    with tab_documents:
-        render_documents(case_payload)
+        elif selected_section == "Tasks":
+            render_tasks(case_id, case_payload, key_prefix="case_workspace")
 
-    with tab_tasks:
-        render_tasks(case_id, case_payload, key_prefix="case_workspace")
+        elif selected_section == "Packet Builder":
+            render_packet(case_payload)
 
-    with tab_packet:
-        render_packet(case_payload)
+        elif selected_section == "Tracking":
+            render_event_form(case_id, key_prefix="case_workspace")
+            st.divider()
+            render_tracking_table(case_payload)
 
-    with tab_tracking:
-        render_event_form(case_id, key_prefix="case_workspace")
-        st.divider()
-        render_tracking_table(case_payload)
+    with workflow_col:
+        render_workflow_actions_card(
+            case_id,
+            key_prefix="case_workspace",
+            case_payload=case_payload,
+            tab_jump_state_key=WORKSPACE_DETAIL_SECTION_PENDING_KEY,
+        )
 
 
 def _render_active_workspace(cases: list[dict]) -> None:
     st.markdown('<p class="section-label">Select</p>', unsafe_allow_html=True)
-    st.subheader("Active Case")
+    st.subheader("Case Selection")
+    st.caption("Pick a case to load the workspace and continue execution.")
 
     if not cases:
         st.info("No cases yet. Create one to begin.")
@@ -629,31 +890,122 @@ def _render_active_workspace(cases: list[dict]) -> None:
         st.session_state.selected_case_id = valid_ids[0]
 
     with st.container(border=True):
+        st.markdown('<p class="section-label">Case Selector</p>', unsafe_allow_html=True)
+        st.markdown('<p class="workspace-select-title">Choose Existing Case</p>', unsafe_allow_html=True)
+        st.markdown(
+            '<p class="workspace-select-help">Use the dropdown to pick which case you want to open below.</p>',
+            unsafe_allow_html=True,
+        )
+        status_counts: dict[str, int] = {}
+        for case in cases:
+            normalized_status = str(case.get("status") or "open").strip().lower()
+            status_counts[normalized_status] = status_counts.get(normalized_status, 0) + 1
+        ready_count = status_counts.get("ready", 0)
+        waiting_count = status_counts.get("waiting_on_docs", 0) + status_counts.get("open", 0)
+        submitted_count = status_counts.get("submitted", 0)
+        resolved_count = (
+            status_counts.get("resolved", 0)
+            + status_counts.get("done", 0)
+            + status_counts.get("closed", 0)
+            + status_counts.get("completed", 0)
+        )
+        st.markdown(
+            f"""
+            <div class="workspace-selector-ribbon"></div>
+            <div class="workspace-selector-metrics">
+                <div class="workspace-selector-metric">
+                    <p class="workspace-selector-metric-kicker">Portfolio</p>
+                    <p class="workspace-selector-metric-value">{len(cases)}</p>
+                </div>
+                <div class="workspace-selector-metric">
+                    <p class="workspace-selector-metric-kicker">Ready</p>
+                    <p class="workspace-selector-metric-value">{ready_count}</p>
+                </div>
+                <div class="workspace-selector-metric">
+                    <p class="workspace-selector-metric-kicker">In Progress</p>
+                    <p class="workspace-selector-metric-value">{waiting_count + submitted_count}</p>
+                </div>
+                <div class="workspace-selector-metric">
+                    <p class="workspace-selector-metric-kicker">Resolved</p>
+                    <p class="workspace-selector-metric-value">{resolved_count}</p>
+                </div>
+            </div>
+            <div class="workspace-selector-tip">
+                Tip: choose your active case first, then use Quick Actions for dashboard/library/navigation shortcuts.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         case_id = select_case(cases, key_prefix="case_workspace_active", label="Current case")
-        action_col1, action_col2 = st.columns(2, gap="small")
-        with action_col1:
-            if st.button(
-                "Back to Start Options",
-                icon=":material/home:",
-                use_container_width=True,
-                key="case_workspace_active_back_to_entry_btn",
-            ):
-                st.session_state[WORKSPACE_FLOW_KEY] = "entry"
-                st.rerun()
-        with action_col2:
-            if st.button(
-                "Create New Case",
-                icon=":material/add_circle:",
-                use_container_width=True,
-                key="case_workspace_active_to_create_btn",
-            ):
-                _clear_pending_create_title()
-                st.session_state[WORKSPACE_FLOW_KEY] = "create"
-                st.rerun()
+        selected_case = next((case for case in cases if case.get("case_id") == case_id), {})
+        if case_id and selected_case:
+            status = str(selected_case.get("status") or "open")
+            pill_class = _status_class(status)
+            selected_col, actions_col = st.columns([1.8, 1], gap="large")
+            with selected_col:
+                st.markdown(
+                    f"""
+                    <div class="workspace-case-highlight">
+                        <p class="workspace-case-kicker">Selected Case</p>
+                        <p class="workspace-case-title">{escape(str(selected_case.get("title") or "Untitled Case"))}</p>
+                        <div class="workspace-case-meta">
+                            <span class="status-pill {pill_class}">{escape(status)}</span>
+                            &nbsp;&nbsp;Case ID: <strong>{escape(str(case_id))}</strong>
+                        </div>
+                        <p class="workspace-case-meta">
+                            Updated: {escape(str(selected_case.get("updated_at") or "n/a"))}
+                        </p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+            with actions_col:
+                st.markdown('<p class="workspace-quick-actions-title">Quick Actions</p>', unsafe_allow_html=True)
+                top_left, top_right = st.columns(2, gap="small")
+                with top_left:
+                    if st.button(
+                        "Case Library",
+                        icon=":material/library_books:",
+                        use_container_width=True,
+                        key="case_workspace_active_open_library_btn",
+                    ):
+                        st.switch_page("pages/4_Case_Library.py")
+                with top_right:
+                    if st.button(
+                        "Dashboard",
+                        icon=":material/dashboard:",
+                        use_container_width=True,
+                        key="case_workspace_active_open_dashboard_btn",
+                    ):
+                        st.switch_page("pages/2_My_Cases.py")
+
+                bottom_left, bottom_right = st.columns(2, gap="small")
+                with bottom_left:
+                    if st.button(
+                        "New Case",
+                        icon=":material/add_circle:",
+                        use_container_width=True,
+                        key="case_workspace_active_to_create_btn",
+                    ):
+                        _clear_pending_create_title()
+                        st.session_state[WORKSPACE_FLOW_KEY] = "create"
+                        st.rerun()
+                with bottom_right:
+                    if st.button(
+                        "Start Options",
+                        icon=":material/home:",
+                        use_container_width=True,
+                        key="case_workspace_active_back_to_entry_btn",
+                    ):
+                        st.session_state[WORKSPACE_FLOW_KEY] = "entry"
+                        st.rerun()
 
     if not case_id:
         st.info("Select a case to continue.")
         return
+
+    st.markdown('<div class="workspace-block-gap"></div>', unsafe_allow_html=True)
 
     case_payload, payload_err = fetch_case_payload(case_id)
     if payload_err or not case_payload:
