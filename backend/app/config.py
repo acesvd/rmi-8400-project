@@ -10,7 +10,22 @@ UPLOAD_DIR = STORAGE_DIR / "uploads"
 ARTIFACT_DIR = STORAGE_DIR / "artifacts"
 DB_PATH = Path(os.getenv("APPEALS_DB_PATH", BASE_DIR / "storage" / "appeals_os.db"))
 
-OLLAMA_BASE_URL = os.getenv("APPEALS_OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+def _normalize_ollama_base_url(raw: str) -> str:
+    value = (raw or "").strip().rstrip("/")
+    if not value:
+        return "http://localhost:11434"
+    # Accept either host form (https://ollama.com) or API form (https://ollama.com/api).
+    if value.endswith("/api"):
+        return value[:-4]
+    return value
+
+
+OLLAMA_BASE_URL = _normalize_ollama_base_url(os.getenv("APPEALS_OLLAMA_BASE_URL", "http://localhost:11434"))
+OLLAMA_API_KEY = (
+    os.getenv("APPEALS_OLLAMA_API_KEY")
+    or os.getenv("OLLAMA_API_KEY")
+    or ""
+).strip()
 OLLAMA_CHAT_MODEL = os.getenv("APPEALS_OLLAMA_CHAT_MODEL", "llama3.1")
 OLLAMA_EXTRACT_MODEL = os.getenv("APPEALS_OLLAMA_EXTRACT_MODEL", OLLAMA_CHAT_MODEL)
 OLLAMA_LETTER_MODEL = os.getenv("APPEALS_OLLAMA_LETTER_MODEL", OLLAMA_CHAT_MODEL)

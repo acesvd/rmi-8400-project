@@ -13,7 +13,6 @@ from lib.api import (
     fetch_cases,
     open_case_workspace_create_flow,
     safe_call,
-    select_case,
 )
 
 
@@ -566,6 +565,13 @@ def _time_since(value: str | None) -> str:
         return f"{hours}h ago"
     days = max(seconds // 86400, 1)
     return f"{days}d ago"
+
+
+def _tracker_case_label(case: dict) -> str:
+    title = str(case.get("title") or "Untitled case")
+    status = str(case.get("status") or "draft").title()
+    case_id = str(case.get("case_id") or "")
+    return f"{title} ({status}) - {case_id}"
 
 
 def _humanize_event_type(value: str | None) -> str:
@@ -1310,18 +1316,13 @@ def main() -> None:
         st.error(f"Could not load cases: {cases_err}")
 
     open_count, pending_count, done_count = _status_buckets(cases)
-    _render_dashboard_glance(cases, open_count, pending_count, done_count)
-    st.markdown('<div class="dashboard-gap-lg"></div>', unsafe_allow_html=True)
 
     active_cases = [case for case in cases if _is_active_case_status(case.get("status"))]
     tracker_cases = active_cases or cases
 
     selected_case_id = st.session_state.get("selected_case_id")
-    if tracker_cases:
-        if not selected_case_id or not any(case.get("case_id") == selected_case_id for case in tracker_cases):
-            st.session_state.selected_case_id = tracker_cases[0].get("case_id")
-            selected_case_id = st.session_state.selected_case_id
-    else:
+    valid_tracker_ids = {str(case.get("case_id") or "") for case in tracker_cases}
+    if not selected_case_id or str(selected_case_id) not in valid_tracker_ids:
         st.session_state.selected_case_id = None
         selected_case_id = None
 
@@ -1342,11 +1343,24 @@ def main() -> None:
             if not tracker_cases:
                 st.info("No cases yet. Create one below to start tracking.")
             else:
-                selected_case_id = select_case(tracker_cases, key_prefix="mycases_tracker", label="Track case")
+                none_label = "None"
+                case_options: dict[str, str | None] = {none_label: None}
+                for case in tracker_cases:
+                    case_options[_tracker_case_label(case)] = str(case.get("case_id") or "")
+
+                option_labels = list(case_options.keys())
+                option_ids = list(case_options.values())
+                default_idx = option_ids.index(selected_case_id) if selected_case_id in option_ids else 0
+                chosen_label = st.selectbox("Track case", option_labels, index=default_idx, key="mycases_tracker_case_selector")
+                selected_case_id = case_options[chosen_label]
+                st.session_state.selected_case_id = selected_case_id
+
                 if selected_case_id:
                     case_payload, payload_err = fetch_case_payload(selected_case_id)
 
-                if payload_err:
+                if not selected_case_id:
+                    st.info("Select or create a case to view your dashboard.")
+                elif payload_err:
                     st.error(f"Could not load selected case: {payload_err}")
                 else:
                     overall, stages = _build_stage_progress(case_payload)
@@ -1361,19 +1375,24 @@ def main() -> None:
     with focus_col:
         _render_workspace_shortcuts_box(compact=True)
 
-    if case_payload and not payload_err:
+    show_dashboard_cards = bool(selected_case_id and case_payload and not payload_err)
+
+    if show_dashboard_cards:
+        _render_dashboard_glance(cases, open_count, pending_count, done_count)
+        st.markdown('<div class="dashboard-gap-lg"></div>', unsafe_allow_html=True)
+
         _render_case_signal_strip(case_payload)
         st.markdown('<div class="dashboard-gap-lg"></div>', unsafe_allow_html=True)
 
-    left_stack, right_stack = st.columns(2, gap="large")
-    with left_stack:
-        _render_case_overview_box(case_payload if not payload_err else None)
-        st.markdown('<div class="dashboard-gap-lg"></div>', unsafe_allow_html=True)
-        _render_recent_activity_feed_box(cases, case_payload if not payload_err else None)
-    with right_stack:
-        _render_action_center_box(case_payload if not payload_err else None, payload_err if payload_err else None)
-        st.markdown('<div class="dashboard-gap-lg"></div>', unsafe_allow_html=True)
-        _render_task_summary_box(case_payload if not payload_err else None)
+        left_stack, right_stack = st.columns(2, gap="large")
+        with left_stack:
+            _render_case_overview_box(case_payload if not payload_err else None)
+            st.markdown('<div class="dashboard-gap-lg"></div>', unsafe_allow_html=True)
+            _render_recent_activity_feed_box(cases, case_payload if not payload_err else None)
+        with right_stack:
+            _render_action_center_box(case_payload if not payload_err else None, payload_err if payload_err else None)
+            st.markdown('<div class="dashboard-gap-lg"></div>', unsafe_allow_html=True)
+            _render_task_summary_box(case_payload if not payload_err else None)
 
     with st.container(border=True):
         st.markdown('<p class="section-label">Create Case</p>', unsafe_allow_html=True)

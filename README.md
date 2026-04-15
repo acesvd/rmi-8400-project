@@ -38,6 +38,7 @@ Notes:
 - PDF/TXT/DOCX flows work without Tesseract, but OCR for image uploads requires a local `tesseract` binary.
 - On Windows, installing Tesseract usually means adding the install directory to `PATH` so `pytesseract` can find `tesseract.exe`.
 - The setup scripts create a local virtual environment in `.venv` and install both backend and UI dependencies from `backend/requirements.txt` and `ui/requirements.txt`.
+- Run scripts automatically load repo-root `.env` if present.
 
 ### macOS/Linux
 
@@ -45,6 +46,7 @@ From project root:
 
 ```bash
 ./scripts/setup_local.sh
+cp .env.example .env
 ```
 
 If your default `python3` is not Python 3.12, create/activate a Python 3.12 environment first and then run the setup script.
@@ -55,6 +57,7 @@ From project root:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\setup_local.ps1
+Copy-Item .env.example .env
 ```
 
 The PowerShell setup script prefers `python3.12` and will fall back to other Python 3 launchers if needed, but Python 3.12 is the expected local version for this project.
@@ -134,10 +137,28 @@ ollama serve
 Optional env vars:
 
 - `APPEALS_OLLAMA_BASE_URL`
+- `APPEALS_OLLAMA_API_KEY` (or `OLLAMA_API_KEY`)
 - `APPEALS_OLLAMA_CHAT_MODEL`
 - `APPEALS_OLLAMA_EXTRACT_MODEL`
 - `APPEALS_OLLAMA_LETTER_MODEL`
 - `APPEALS_OLLAMA_TIMEOUT`
+
+### Ollama Cloud API Mode
+
+For cloud deployments, point backend AI calls to Ollama Cloud API:
+
+```bash
+export APPEALS_OLLAMA_BASE_URL="https://ollama.com/api"
+export APPEALS_OLLAMA_API_KEY="<your_ollama_api_key>"
+export APPEALS_OLLAMA_CHAT_MODEL="gpt-oss:20b"
+export APPEALS_OLLAMA_EXTRACT_MODEL="gpt-oss:20b"
+export APPEALS_OLLAMA_LETTER_MODEL="gpt-oss:20b"
+```
+
+Notes:
+
+- `APPEALS_OLLAMA_BASE_URL` accepts either `https://ollama.com` or `https://ollama.com/api`.
+- If a model is configured with a `-cloud` suffix, it will be normalized automatically for Ollama Cloud API requests.
 
 ## Demo Flow (Class)
 

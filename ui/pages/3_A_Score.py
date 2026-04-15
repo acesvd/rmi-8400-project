@@ -198,6 +198,61 @@ def _inject_styles() -> None:
             border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
         }
 
+        /* --- Insurer benchmark panel (R2) --- */
+        .benchmark-shell {
+            padding: 0.95rem 1rem;
+            border-radius: 14px;
+            margin-bottom: 0.75rem;
+            border: 1px solid color-mix(in srgb, currentColor 24%, transparent);
+            background: linear-gradient(
+                180deg,
+                color-mix(in srgb, currentColor 4%, transparent) 0%,
+                color-mix(in srgb, currentColor 7%, transparent) 100%
+            );
+        }
+        .benchmark-title {
+            font-size: 1rem;
+            font-weight: 700;
+            margin: 0 0 0.2rem 0;
+            color: inherit;
+        }
+        .benchmark-sub {
+            margin: 0;
+            font-size: 0.84rem;
+            color: color-mix(in srgb, currentColor 62%, transparent);
+        }
+        .benchmark-grid {
+            margin-top: 0.7rem;
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.55rem;
+        }
+        .benchmark-stat {
+            border-radius: 11px;
+            padding: 0.6rem 0.7rem;
+            border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+            background: color-mix(in srgb, currentColor 6%, transparent);
+        }
+        .benchmark-stat-kicker {
+            margin: 0;
+            text-transform: uppercase;
+            letter-spacing: 0.09em;
+            font-size: 0.64rem;
+            font-weight: 700;
+            color: color-mix(in srgb, currentColor 58%, transparent);
+        }
+        .benchmark-stat-value {
+            margin: 0.1rem 0 0;
+            font-size: 1.04rem;
+            font-weight: 700;
+            color: inherit;
+        }
+        @media (max-width: 1120px) {
+            .benchmark-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
         </style>
         """,
         unsafe_allow_html=True,
@@ -389,6 +444,104 @@ def _render_score_card(
         f'</div>',
         unsafe_allow_html=True,
     )
+
+
+def _parse_agent_score(raw_score: Any) -> int | None:
+    if isinstance(raw_score, (int, float)):
+        value = int(raw_score)
+    elif isinstance(raw_score, str):
+        try:
+            value = int(float(raw_score))
+        except ValueError:
+            return None
+    else:
+        return None
+    return max(0, min(100, value))
+
+
+def _render_agent_score_card(agent_score: dict[str, Any], *, title: str = "AI-Score") -> None:
+    if not agent_score:
+        return
+
+    ag_sc = _parse_agent_score(agent_score.get("score"))
+    ag_rate = (ag_sc / 100.0) if ag_sc is not None else None
+    ag_str = _strength(ag_rate)
+    ag_assess = str(agent_score.get("assessment") or "")
+    ag_source = str(agent_score.get("source") or "")
+    ag_color = _score_color(ag_rate)
+    ag_score_text = f"{ag_sc}%" if ag_sc is not None else "—"
+
+    source_label = "🤖 Ollama" if ag_source == "ollama" else "📊 Rule-based"
+
+    st.markdown(
+        f'<div class="score-card" style="border-color:{ag_color}44">'
+        f'<div class="section-label">{title}</div>'
+        f'<div class="score-source">{source_label}</div>'
+        f'<div class="score-big" style="color:{ag_color}">{ag_score_text}</div>'
+        f'<div class="score-sub" style="font-size:0.95rem;font-weight:600;'
+        f'color:{ag_color}">{ag_str}</div>'
+        f'<div class="score-assessment">{ag_assess}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _to_float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _pct_to_rate(value: Any) -> float | None:
+    pct = _to_float(value)
+    return None if pct is None else (pct / 100.0)
+
+
+def _fmt_count(value: Any) -> str:
+    number = _to_float(value)
+    if number is None:
+        return "—"
+    return f"{int(number):,}"
+
+
+def _render_insurer_benchmark_panel(benchmark: dict[str, Any], *, payer: str) -> None:
+    insurer = str(benchmark.get("insurer") or payer or "Unknown")
+    year = benchmark.get("year")
+    requested_insurer = str(benchmark.get("requested_insurer") or "").strip()
+    note = str(benchmark.get("note") or "").strip()
+
+    st.markdown(
+        f"""
+        <div class="benchmark-shell">
+            <p class="benchmark-title">{insurer}</p>
+            <p class="benchmark-sub">Benchmark year: {year if year else "N/A"}</p>
+            <div class="benchmark-grid">
+                <div class="benchmark-stat">
+                    <p class="benchmark-stat-kicker">Internal Filed</p>
+                    <p class="benchmark-stat-value">{_fmt_count(benchmark.get("internal_appeals_filed"))}</p>
+                </div>
+                <div class="benchmark-stat">
+                    <p class="benchmark-stat-kicker">Internal Overturned</p>
+                    <p class="benchmark-stat-value">{_fmt_count(benchmark.get("internal_appeals_overturned"))}</p>
+                </div>
+                <div class="benchmark-stat">
+                    <p class="benchmark-stat-kicker">External Filed</p>
+                    <p class="benchmark-stat-value">{_fmt_count(benchmark.get("external_appeals_filed"))}</p>
+                </div>
+                <div class="benchmark-stat">
+                    <p class="benchmark-stat-kicker">External Overturned</p>
+                    <p class="benchmark-stat-value">{_fmt_count(benchmark.get("external_appeals_overturned"))}</p>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if note:
+        st.info(note)
+    if requested_insurer and requested_insurer.lower() != insurer.lower():
+        st.caption(f"Requested payer: {requested_insurer}")
 
 
 def _highlight_shared_words(text: str, query: str) -> str:
@@ -625,48 +778,26 @@ def main() -> None:
                 confidence=conf,
             )
 
-            if agent_score:
-                raw_ag_score = agent_score.get("score")
-                ag_sc: int | None = None
-                if isinstance(raw_ag_score, (int, float)):
-                    ag_sc = int(raw_ag_score)
-                elif isinstance(raw_ag_score, str):
-                    try:
-                        ag_sc = int(float(raw_ag_score))
-                    except ValueError:
-                        ag_sc = None
-                if ag_sc is not None:
-                    ag_sc = max(0, min(100, ag_sc))
-                ag_rate = (ag_sc / 100.0) if ag_sc is not None else None
-                ag_str = _strength(ag_rate)
-                ag_assess = agent_score.get("assessment", "")
-                ag_source = agent_score.get("source", "")
-                ag_color = _score_color(ag_rate)
-                ag_score_text = f"{ag_sc}%" if ag_sc is not None else "—"
-
-                source_label = "🤖 Ollama" if ag_source == "ollama" else "📊 Rule-based"
-
-                st.markdown(
-                    f'<div class="score-card" style="border-color:{ag_color}44">'
-                    f'<div class="section-label">AI-Score</div>'
-                    f'<div class="score-source">{source_label}</div>'
-                    f'<div class="score-big" style="color:{ag_color}">{ag_score_text}</div>'
-                    f'<div class="score-sub" style="font-size:0.95rem;font-weight:600;'
-                    f'color:{ag_color}">{ag_str}</div>'
-                    f'<div class="score-assessment">{ag_assess}</div>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
+            _render_agent_score_card(agent_score, title="AI-Score")
 
         elif classification == "R2":
-            int_pct = benchmark.get("internal_overturn_pct")
-            ext_pct = benchmark.get("external_overturn_pct")
-            if int_pct is not None:
-                _render_score_card("Internal Appeal Rate", payer, int_pct / 100,
-                                   [f"Year: {benchmark.get('year', 'N/A')}"])
-            if ext_pct is not None:
-                _render_score_card("External Review Rate", payer, ext_pct / 100,
-                                   [f"Year: {benchmark.get('year', 'N/A')}"])
+            rate = a_score.get("overturn_rate")
+            n = a_score.get("sample_size", 0)
+            conf = a_score.get("confidence", "none")
+            yr = a_score.get("year_range", "")
+            detail_lines = [f"{n:,} insurer appeal records · {yr or 'latest year'}"]
+            match_type = str(benchmark.get("match_type") or "")
+            if match_type == "fallback_all_insurers":
+                detail_lines.append("Using pooled insurer benchmark")
+
+            _render_score_card(
+                "Procedural A-Score",
+                "Insurer benchmark + case readiness",
+                rate,
+                detail_lines,
+                confidence=conf,
+            )
+            _render_agent_score_card(agent_score, title="Procedural AI-Score")
 
         non_prec_recs = [r for r in recs if not r.startswith("Precedent case ")]
         if non_prec_recs:
@@ -744,7 +875,43 @@ def main() -> None:
             st.markdown('<p class="section-label">Insurer Appeal Data</p>', unsafe_allow_html=True)
             st.caption("Procedural denials use insurer benchmarks, not clinical precedent.")
             if benchmark and "error" not in benchmark:
-                st.json(benchmark)
+                _render_insurer_benchmark_panel(benchmark, payer=payer)
+
+                int_pct = benchmark.get("internal_overturn_pct")
+                ext_pct = benchmark.get("external_overturn_pct")
+                insurer_label = str(benchmark.get("insurer") or payer)
+                benchmark_year = benchmark.get("year") or "N/A"
+
+                internal_lines = [
+                    f"Overturned {_fmt_count(benchmark.get('internal_appeals_overturned'))} "
+                    f"of {_fmt_count(benchmark.get('internal_appeals_filed'))} appeals",
+                    f"Year: {benchmark_year}",
+                ]
+                external_lines = [
+                    f"Overturned {_fmt_count(benchmark.get('external_appeals_overturned'))} "
+                    f"of {_fmt_count(benchmark.get('external_appeals_filed'))} appeals",
+                    f"Year: {benchmark_year}",
+                ]
+
+                rates_col1, rates_col2 = st.columns(2, gap="small")
+                with rates_col1:
+                    _render_score_card(
+                        "Internal Appeal Rate",
+                        insurer_label,
+                        _pct_to_rate(int_pct),
+                        internal_lines,
+                    )
+                with rates_col2:
+                    _render_score_card(
+                        "External Review Rate",
+                        insurer_label,
+                        _pct_to_rate(ext_pct),
+                        external_lines,
+                    )
+            elif benchmark and benchmark.get("error"):
+                st.warning(str(benchmark.get("error")))
+            else:
+                st.info("No insurer benchmark data is available for this case.")
 
 
 if __name__ == "__main__":

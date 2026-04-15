@@ -100,6 +100,7 @@ def _render_login_page() -> None:
 
     st.title("Log In")
     st.caption("Sign in to access My Cases, AI Chatbox, and A-Score.")
+    expected_username, expected_password = _configured_credentials()
 
     with st.form("login_form"):
         username = st.text_input("Username")
@@ -107,7 +108,6 @@ def _render_login_page() -> None:
         submitted = st.form_submit_button("Log In", use_container_width=True)
 
     if submitted:
-        expected_username, expected_password = _configured_credentials()
         username_ok = hmac.compare_digest(username.strip(), expected_username)
         password_ok = hmac.compare_digest(password, expected_password)
         if username_ok and password_ok:
@@ -119,7 +119,7 @@ def _render_login_page() -> None:
         else:
             st.error("Invalid username or password.")
 
-    if os.getenv(APP_USERNAME_ENV) is None and os.getenv(APP_PASSWORD_ENV) is None:
+    if expected_username == DEFAULT_USERNAME and expected_password == DEFAULT_PASSWORD:
         st.info("Demo login credentials: `admin` / `claimright`.")
 
     st.divider()

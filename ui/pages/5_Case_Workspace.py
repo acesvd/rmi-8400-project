@@ -449,6 +449,21 @@ def _safe_text_filename(title: str) -> str:
     return f"{base}.txt"
 
 
+def _suggest_doc_type_for_filename(file_name: str) -> str:
+    name = (file_name or "").strip().lower()
+    if not name:
+        return "other"
+    if "denial" in name:
+        return "denial_letter"
+    if "eob" in name or "explanation_of_benefits" in name:
+        return "eob"
+    if "prior_auth" in name or "prior-auth" in name or "authorization" in name or "preauth" in name:
+        return "prior_auth"
+    if "record" in name or "clinical" in name or "note" in name or "chart" in name:
+        return "medical_records"
+    return "other"
+
+
 def _manual_value(value: str) -> str:
     cleaned = value.strip()
     return cleaned if cleaned else "Not provided"
@@ -613,6 +628,8 @@ def _render_create_case_setup(cases: list[dict]) -> None:
         _clear_pending_create_title()
         st.rerun()
 
+    selected_doc_types: list[str] = []
+
     with st.container(border=True):
         st.markdown('<p class="section-label">Option 1</p>', unsafe_allow_html=True)
         st.subheader("Upload Documents")
@@ -623,7 +640,21 @@ def _render_create_case_setup(cases: list[dict]) -> None:
             accept_multiple_files=True,
             key="case_workspace_create_upload_file",
         )
-        doc_type = st.selectbox("Doc type", DOC_TYPES, key="case_workspace_create_upload_doc_type")
+        if uploaded_files:
+            st.caption("Choose a document type for each selected file.")
+            for idx, uploaded_file in enumerate(uploaded_files):
+                suggested = _suggest_doc_type_for_filename(uploaded_file.name)
+                default_doc_type = suggested if suggested in DOC_TYPES else "other"
+                if default_doc_type not in DOC_TYPES:
+                    default_doc_type = DOC_TYPES[0]
+                default_index = DOC_TYPES.index(default_doc_type)
+                selected_type = st.selectbox(
+                    f"Doc type for `{uploaded_file.name}`",
+                    DOC_TYPES,
+                    index=default_index,
+                    key=f"case_workspace_create_upload_doc_type_{idx}",
+                )
+                selected_doc_types.append(selected_type)
         auto_process = st.toggle(
             "Auto process on upload",
             value=True,
@@ -771,13 +802,14 @@ def _render_create_case_setup(cases: list[dict]) -> None:
             return
 
         upload_errors: list[str] = []
-        for uploaded_file in uploaded_files or []:
+        for idx, uploaded_file in enumerate(uploaded_files or []):
+            file_doc_type = selected_doc_types[idx] if idx < len(selected_doc_types) else DOC_TYPES[0]
             upload_err = _upload_document_to_case(
                 case_id=created_case_id,
                 file_name=uploaded_file.name,
                 file_bytes=uploaded_file.getvalue(),
                 mime_type=uploaded_file.type or "application/octet-stream",
-                doc_type=doc_type,
+                doc_type=file_doc_type,
                 auto_process=auto_process,
             )
             if upload_err:

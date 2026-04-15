@@ -36,6 +36,7 @@ S3_CSV_PATH = DATA_DIR / "s3_appeals.csv"
 # ---------------------------------------------------------------------------
 
 PAYER_MAP: dict[str, str] = {
+    "apex health shield": "Blue Shield of California",
     "anthem": "Anthem Blue Cross",
     "blue cross": "Anthem Blue Cross",
     "blue shield": "Blue Shield of California",
@@ -444,6 +445,111 @@ def _load_s3() -> list[dict[str, Any]]:
     return _s3_cache
 
 
+def _normalize_s3_row(row: dict[str, Any]) -> dict[str, Any] | None:
+    """Normalize and validate an S3 row.
+
+    Rejects clearly corrupt rows (for example overturned > filed).
+    If percentages are out of range but counts are valid, recomputes percentages
+    from counts.
+    """
+    year = _safe_int(row.get("year"))
+    insurer = str(row.get("insurer") or "").strip() or "Unknown"
+
+    internal_filed = _safe_int(row.get("internal_appeals_filed")) or 0
+    internal_overturned = _safe_int(row.get("internal_appeals_overturned")) or 0
+    external_filed = _safe_int(row.get("external_appeals_filed")) or 0
+    external_overturned = _safe_int(row.get("external_appeals_overturned")) or 0
+
+    if any(v < 0 for v in [internal_filed, internal_overturned, external_filed, external_overturned]):
+        return None
+    if (internal_filed == 0 and internal_overturned > 0) or (external_filed == 0 and external_overturned > 0):
+        return None
+    if internal_filed > 0 and internal_overturned > internal_filed:
+        return None
+    if external_filed > 0 and external_overturned > external_filed:
+        return None
+
+    internal_pct_raw = _safe_float(row.get("internal_overturn_pct"))
+    external_pct_raw = _safe_float(row.get("external_overturn_pct"))
+
+    internal_pct_from_counts = (
+        round((internal_overturned / internal_filed) * 100, 1) if internal_filed > 0 else None
+    )
+    external_pct_from_counts = (
+        round((external_overturned / external_filed) * 100, 1) if external_filed > 0 else None
+    )
+
+    if internal_pct_raw is not None and 0.0 <= internal_pct_raw <= 100.0:
+        internal_pct = internal_pct_raw
+    else:
+        internal_pct = internal_pct_from_counts
+
+    if external_pct_raw is not None and 0.0 <= external_pct_raw <= 100.0:
+        external_pct = external_pct_raw
+    else:
+        external_pct = external_pct_from_counts
+
+    if internal_pct is None and external_pct is None:
+        return None
+
+    return {
+        "insurer": insurer,
+        "year": year,
+        "internal_appeals_filed": internal_filed,
+        "internal_appeals_overturned": internal_overturned,
+        "internal_overturn_pct": internal_pct,
+        "external_appeals_filed": external_filed,
+        "external_appeals_overturned": external_overturned,
+        "external_overturn_pct": external_pct,
+        "source": "S3_CovCA_Appeals",
+    }
+
+
+def _aggregate_s3_benchmark(rows: list[dict[str, Any]], *, year: int | None = None) -> dict[str, Any]:
+    normalized_rows = []
+    for row in rows:
+        normalized = _normalize_s3_row(row)
+        if normalized is not None:
+            normalized_rows.append(normalized)
+
+    if not normalized_rows:
+        return {"error": "S3 data is present but all rows were invalid", "source": "S3_CovCA_Appeals"}
+
+    years = [r.get("year") for r in normalized_rows]
+    valid_years = [y for y in years if y is not None]
+
+    target_year = year
+    if target_year is None and valid_years:
+        target_year = max(valid_years)
+
+    scoped = normalized_rows
+    if target_year is not None:
+        by_year = [r for r in normalized_rows if r.get("year") == target_year]
+        if by_year:
+            scoped = by_year
+
+    internal_filed = sum((r.get("internal_appeals_filed") or 0) for r in scoped)
+    internal_overturned = sum((r.get("internal_appeals_overturned") or 0) for r in scoped)
+    external_filed = sum((r.get("external_appeals_filed") or 0) for r in scoped)
+    external_overturned = sum((r.get("external_appeals_overturned") or 0) for r in scoped)
+
+    internal_pct = round((internal_overturned / internal_filed) * 100, 1) if internal_filed > 0 else None
+    external_pct = round((external_overturned / external_filed) * 100, 1) if external_filed > 0 else None
+
+    return {
+        "insurer": "All Covered CA Insurers",
+        "year": target_year,
+        "internal_appeals_filed": internal_filed,
+        "internal_appeals_overturned": internal_overturned,
+        "internal_overturn_pct": internal_pct,
+        "external_appeals_filed": external_filed,
+        "external_appeals_overturned": external_overturned,
+        "external_overturn_pct": external_pct,
+        "source": "S3_CovCA_Appeals",
+        "match_type": "fallback_all_insurers",
+    }
+
+
 def get_insurer_appeal_benchmark(insurer: str, year: int | None = None) -> dict[str, Any]:
     """Look up insurer's appeal overturn stats from S3.
 
@@ -463,45 +569,47 @@ def get_insurer_appeal_benchmark(insurer: str, year: int | None = None) -> dict[
         low = insurer_norm.lower()
         matched = [r for r in rows if low in r.get("insurer", "").lower()]
 
+    normalized_matched = []
+    for row in matched:
+        normalized = _normalize_s3_row(row)
+        if normalized is not None:
+            normalized_matched.append(normalized)
+
     if not matched:
-        return {
-            "error": f"No S3 data for insurer: {insurer}",
-            "source": "S3_CovCA_Appeals",
-        }
+        fallback = _aggregate_s3_benchmark(rows, year=year)
+        fallback["requested_insurer"] = insurer
+        fallback["note"] = (
+            f"No direct S3 insurer match for '{insurer}'. "
+            "Using pooled benchmark across all Covered CA insurers."
+        )
+        return fallback
 
     if year:
-        year_matched = [r for r in matched if str(r.get("year", "")) == str(year)]
+        year_matched = [r for r in normalized_matched if r.get("year") == year]
         if year_matched:
-            matched = year_matched
+            normalized_matched = year_matched
 
-    try:
-        matched.sort(key=lambda r: int(r.get("year", 0)), reverse=True)
-    except (ValueError, TypeError):
-        pass
+    if not normalized_matched:
+        fallback = _aggregate_s3_benchmark(rows, year=year)
+        fallback["requested_insurer"] = insurer
+        fallback["note"] = (
+            f"S3 rows matched insurer '{insurer_norm}', but all matched rows were invalid. "
+            "Using pooled benchmark across all Covered CA insurers."
+        )
+        return fallback
 
-    latest = matched[0]
-
-    def _safe_int(v: Any) -> int | None:
-        try:
-            return int(v)
-        except (ValueError, TypeError):
-            return None
-
-    def _safe_float(v: Any) -> float | None:
-        try:
-            return float(v)
-        except (ValueError, TypeError):
-            return None
+    normalized_matched.sort(key=lambda r: (r.get("year") is not None, r.get("year") or -1), reverse=True)
+    latest = normalized_matched[0]
 
     return {
         "insurer": latest.get("insurer", insurer),
-        "year": _safe_int(latest.get("year")),
-        "internal_appeals_filed": _safe_int(latest.get("internal_appeals_filed")),
-        "internal_appeals_overturned": _safe_int(latest.get("internal_appeals_overturned")),
-        "internal_overturn_pct": _safe_float(latest.get("internal_overturn_pct")),
-        "external_appeals_filed": _safe_int(latest.get("external_appeals_filed")),
-        "external_appeals_overturned": _safe_int(latest.get("external_appeals_overturned")),
-        "external_overturn_pct": _safe_float(latest.get("external_overturn_pct")),
+        "year": latest.get("year"),
+        "internal_appeals_filed": latest.get("internal_appeals_filed"),
+        "internal_appeals_overturned": latest.get("internal_appeals_overturned"),
+        "internal_overturn_pct": latest.get("internal_overturn_pct"),
+        "external_appeals_filed": latest.get("external_appeals_filed"),
+        "external_appeals_overturned": latest.get("external_appeals_overturned"),
+        "external_overturn_pct": latest.get("external_overturn_pct"),
         "source": "S3_CovCA_Appeals",
     }
 
@@ -529,6 +637,28 @@ def _map_denial_label_to_imr_type(label: str) -> str | None:
     if "experimental" in label_low or "investigational" in label_low:
         return "Experimental/Investigational"
     return None
+
+
+def _safe_float(value: Any) -> float | None:
+    if isinstance(value, str):
+        value = value.strip().replace(",", "")
+        if value.endswith("%"):
+            value = value[:-1]
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def _safe_int(value: Any) -> int | None:
+    if isinstance(value, str):
+        value = value.strip().replace(",", "")
+        if value.endswith("%"):
+            value = value[:-1]
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return None
 
 
 def _compute_agent_score(
@@ -630,6 +760,203 @@ def _compute_agent_score(
         "score": 0,
         "assessment": "Insufficient data to assess appeal strength.",
         "strength": "unknown",
+        "source": "rule_based",
+    }
+
+
+def _procedural_identifier_count(case_json: dict[str, Any]) -> int:
+    identifiers = case_json.get("identifiers") if isinstance(case_json.get("identifiers"), dict) else {}
+    raw_values = [
+        identifiers.get("claim_number"),
+        identifiers.get("auth_number"),
+        identifiers.get("member_id"),
+    ]
+    known = 0
+    for value in raw_values:
+        text = str(value or "").strip().lower()
+        if text and text not in {"unknown", "none", "n/a", "na"}:
+            known += 1
+    return known
+
+
+def _compute_procedural_a_score(
+    *,
+    case_json: dict[str, Any],
+    benchmark: dict[str, Any],
+) -> dict[str, Any]:
+    """Estimate procedural appealability from insurer benchmark + case readiness."""
+    if not benchmark or benchmark.get("error"):
+        return _empty_score("No insurer benchmark found for this payer")
+
+    int_pct = _safe_float(benchmark.get("internal_overturn_pct"))
+    ext_pct = _safe_float(benchmark.get("external_overturn_pct"))
+    int_rate = (int_pct / 100.0) if int_pct is not None else None
+    ext_rate = (ext_pct / 100.0) if ext_pct is not None else None
+
+    if int_rate is not None and ext_rate is not None:
+        # Internal success is usually the first step, so weight it higher.
+        base_rate = (0.7 * int_rate) + (0.3 * ext_rate)
+    elif int_rate is not None:
+        base_rate = int_rate
+    elif ext_rate is not None:
+        base_rate = ext_rate
+    else:
+        return _empty_score("Insurer benchmark is present but missing overturn percentages")
+
+    requested_docs = case_json.get("requested_documents") if isinstance(case_json.get("requested_documents"), list) else []
+    missing_doc_count = len([doc for doc in requested_docs if str(doc or "").strip()])
+    known_identifiers = _procedural_identifier_count(case_json)
+    deadlines = case_json.get("deadlines") if isinstance(case_json.get("deadlines"), list) else []
+    submission_channels = case_json.get("submission_channels") if isinstance(case_json.get("submission_channels"), list) else []
+
+    adjustment = 0.0
+    adjustment += min(0.015 * known_identifiers, 0.045)
+    if deadlines:
+        adjustment += 0.02
+    if submission_channels:
+        adjustment += 0.015
+    adjustment -= min(0.02 * missing_doc_count, 0.10)
+
+    adjusted_rate = min(max(base_rate + adjustment, 0.02), 0.98)
+
+    internal_filed = _safe_int(benchmark.get("internal_appeals_filed")) or 0
+    external_filed = _safe_int(benchmark.get("external_appeals_filed")) or 0
+    internal_overturned = _safe_int(benchmark.get("internal_appeals_overturned")) or 0
+    external_overturned = _safe_int(benchmark.get("external_appeals_overturned")) or 0
+
+    sample_size = internal_filed + external_filed
+    overturned_count = internal_overturned + external_overturned
+    if sample_size <= 0 and overturned_count > 0:
+        sample_size = overturned_count
+    if sample_size > 0 and overturned_count > sample_size:
+        overturned_count = sample_size
+    upheld_count = max(sample_size - overturned_count, 0)
+
+    if sample_size >= 3000:
+        confidence = "high"
+    elif sample_size >= 800:
+        confidence = "medium"
+    elif sample_size >= 100:
+        confidence = "low"
+    elif sample_size > 0:
+        confidence = "very_low"
+    else:
+        confidence = "none"
+
+    year_value = benchmark.get("year")
+    year_range = str(year_value) if year_value is not None else ""
+    note = (
+        "Procedural estimate from insurer appeal benchmarks, adjusted for case readiness "
+        "(identifiers, deadlines, submission channels, and missing requested documents)."
+    )
+
+    return {
+        "overturn_rate": round(adjusted_rate, 3),
+        "sample_size": sample_size,
+        "overturned_count": overturned_count,
+        "upheld_count": upheld_count,
+        "other_count": 0,
+        "confidence": confidence,
+        "year_range": year_range,
+        "source": "S3_CovCA_Appeals",
+        "note": note,
+    }
+
+
+def _compute_procedural_agent_score(
+    *,
+    a_score: dict[str, Any],
+    benchmark: dict[str, Any],
+    denial_label: str,
+    case_json: dict[str, Any],
+    payer: str,
+) -> dict[str, Any]:
+    """Generate an AI-style score for R2/procedural denials."""
+    rate = a_score.get("overturn_rate")
+    sample_size = a_score.get("sample_size", 0)
+    if rate is None:
+        return {
+            "score": 0,
+            "assessment": "Insufficient insurer benchmark data to assess procedural appealability.",
+            "strength": "unknown",
+            "source": "rule_based",
+        }
+
+    int_pct = benchmark.get("internal_overturn_pct")
+    ext_pct = benchmark.get("external_overturn_pct")
+    requested_docs = case_json.get("requested_documents") if isinstance(case_json.get("requested_documents"), list) else []
+    missing_docs = [str(doc).strip() for doc in requested_docs if str(doc or "").strip()]
+    known_identifiers = _procedural_identifier_count(case_json)
+    score_fallback = int(round(rate * 100))
+
+    try:
+        from .llm import OllamaClient
+        from ..config import OLLAMA_CHAT_MODEL
+
+        client = OllamaClient()
+        if client.is_available():
+            prompt = (
+                "You are an insurance appeals analyst. Score this procedural denial appealability.\n"
+                "Return ONLY JSON with keys: score (0-100), assessment (1-2 sentences), "
+                "strength (strong|moderate|limited).\n\n"
+                f"Denial label: {denial_label}\n"
+                f"Payer: {payer}\n"
+                f"Procedural baseline score: {score_fallback}% (n={sample_size})\n"
+                f"Insurer internal overturn %: {int_pct}\n"
+                f"Insurer external overturn %: {ext_pct}\n"
+                f"Known identifiers count: {known_identifiers}/3\n"
+                f"Requested docs still missing: {missing_docs[:6]}\n"
+                "Focus on procedural success likelihood and what to fix first."
+            )
+            result = client.generate_json(
+                prompt=prompt,
+                model=OLLAMA_CHAT_MODEL,
+                temperature=0.1,
+            )
+            raw_score = result.get("score", score_fallback)
+            parsed_score = _safe_int(raw_score)
+            if parsed_score is None:
+                parsed_score = score_fallback
+            parsed_score = max(0, min(100, parsed_score))
+            return {
+                "score": parsed_score,
+                "assessment": result.get("assessment", ""),
+                "strength": result.get("strength", "moderate"),
+                "source": "ollama",
+            }
+    except Exception as exc:
+        logger.info("Procedural agent score fallback (Ollama unavailable): %s", exc)
+
+    score = score_fallback
+    if missing_docs:
+        score = max(0, score - min(15, 3 * len(missing_docs)))
+
+    if score >= 70:
+        strength = "strong"
+        assessment = (
+            f"Procedural appeal prospects are strong for {normalize_payer(payer)} based on insurer-level "
+            f"overturn trends and your current case readiness."
+        )
+    elif score >= 40:
+        strength = "moderate"
+        assessment = (
+            f"Procedural appeal prospects are moderate for {normalize_payer(payer)}. "
+            f"The likely outcome depends on complete supporting documentation and accurate identifiers."
+        )
+    else:
+        strength = "limited"
+        assessment = (
+            f"Procedural appeal prospects are limited for {normalize_payer(payer)} unless the record is "
+            f"tightened before submission."
+        )
+
+    if missing_docs:
+        assessment += f" Prioritize the remaining requested documents: {', '.join(missing_docs[:3])}."
+
+    return {
+        "score": score,
+        "assessment": assessment,
+        "strength": strength,
         "source": "rule_based",
     }
 
@@ -957,9 +1284,17 @@ def get_appealability(case_json: dict[str, Any]) -> dict[str, Any]:
 
     # --- R2 path: S3 for insurer benchmark + routing ---
     elif classification == "R2":
-        result["a_score"] = _empty_score("Not an IMR-eligible denial type — using insurer benchmark")
         benchmark = get_insurer_appeal_benchmark(payer)
         result["insurer_benchmark"] = benchmark
+        a_score = _compute_procedural_a_score(case_json=case_json, benchmark=benchmark)
+        result["a_score"] = a_score
+        result["agent_score"] = _compute_procedural_agent_score(
+            a_score=a_score,
+            benchmark=benchmark,
+            denial_label=label,
+            case_json=case_json,
+            payer=payer,
+        )
 
         recs = [
             f"This denial ({label.replace('_', ' ')}) is procedural, not clinical.",
@@ -992,6 +1327,14 @@ def get_appealability(case_json: dict[str, Any]) -> dict[str, Any]:
         else:
             recs.append(
                 "Resubmit with correct documentation or contact member services to resolve."
+            )
+
+        if a_score.get("overturn_rate") is not None:
+            procedural_pct = int(round(float(a_score["overturn_rate"]) * 100))
+            n = a_score.get("sample_size", 0)
+            recs.append(
+                f"Procedural A-Score estimate: {procedural_pct}% based on insurer appeals data "
+                f"(n={n}). Improve documentation completeness before filing."
             )
 
         result["recommendations"] = recs

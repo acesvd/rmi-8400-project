@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
 from ..config import (
+    OLLAMA_API_KEY,
     OLLAMA_BASE_URL,
     OLLAMA_CHAT_MODEL,
     OLLAMA_EXTRACT_MODEL,
@@ -18,6 +20,7 @@ from ..config import (
 @dataclass
 class OllamaConfig:
     base_url: str = OLLAMA_BASE_URL
+    api_key: str = OLLAMA_API_KEY
     chat_model: str = OLLAMA_CHAT_MODEL
     extract_model: str = OLLAMA_EXTRACT_MODEL
     letter_model: str = OLLAMA_LETTER_MODEL
@@ -27,16 +30,32 @@ class OllamaConfig:
 class OllamaClient:
     def __init__(self, config: OllamaConfig | None = None):
         self.config = config or OllamaConfig()
+        self.session = requests.Session()
+        self.session.headers.update({"Accept": "application/json"})
+        if self.config.api_key:
+            self.session.headers.update({"Authorization": f"Bearer {self.config.api_key}"})
+
+    def _is_cloud_base(self) -> bool:
+        netloc = urlparse(self.config.base_url).netloc.lower()
+        return netloc.endswith("ollama.com")
+
+    def _normalize_model_name(self, model: str) -> str:
+        # Ollama Cloud direct API expects canonical model names (for example gpt-oss:20b).
+        # If callers pass a local cloud-offload alias (for example gpt-oss:20b-cloud), map it.
+        cleaned = (model or "").strip()
+        if self._is_cloud_base() and cleaned.endswith("-cloud"):
+            return cleaned[: -len("-cloud")]
+        return cleaned
 
     def is_available(self) -> bool:
         try:
-            r = requests.get(f"{self.config.base_url}/api/tags", timeout=4)
+            r = self.session.get(f"{self.config.base_url}/api/tags", timeout=4)
             return r.status_code == 200
         except Exception:
             return False
 
     def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        r = requests.post(
+        r = self.session.post(
             f"{self.config.base_url}{path}",
             json=payload,
             timeout=self.config.timeout_seconds,
@@ -65,7 +84,7 @@ class OllamaClient:
         format_json: bool = False,
     ) -> str:
         payload: dict[str, Any] = {
-            "model": model,
+            "model": self._normalize_model_name(model),
             "prompt": prompt,
             "stream": False,
             "options": {"temperature": temperature},
@@ -84,7 +103,7 @@ class OllamaClient:
         temperature: float = 0.2,
     ) -> str:
         payload = {
-            "model": model,
+            "model": self._normalize_model_name(model),
             "messages": messages,
             "stream": False,
             "options": {"temperature": temperature},
