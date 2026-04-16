@@ -878,9 +878,13 @@ def render_workflow_actions_card(
         st.caption("Select a case to run workflow actions.")
         return
 
+    demo_mode = is_demo_user_mode()
+
     with st.container(border=True):
         st.markdown("### Workflow Actions")
         st.caption("Follow the workflow in order, or jump to the step you need.")
+        if demo_mode:
+            st.caption("Demo account notice: Workflow actions are temporarily disabled for live demo stability.")
         st.markdown(
             """
             <div style="display:flex;flex-wrap:wrap;gap:0.38rem;margin:0.12rem 0 0.58rem;">
@@ -921,7 +925,7 @@ def render_workflow_actions_card(
         for idx, (step_key, label, path, success_message, json_body, key_suffix) in enumerate(ordered_actions):
             step_state = state_by_step.get(step_key, {"state": "pending", "note": "Not run yet."})
             button_label = f"{label} · {_workflow_button_suffix(step_state.get('state', 'pending'))}"
-            if st.button(button_label, use_container_width=True, key=f"{key_prefix}_{key_suffix}"):
+            if st.button(button_label, use_container_width=True, key=f"{key_prefix}_{key_suffix}", disabled=demo_mode):
                 if tab_jump_state_key:
                     target_section = {
                         "process": "Documents",

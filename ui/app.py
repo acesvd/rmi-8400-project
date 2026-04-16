@@ -52,11 +52,15 @@ def _render_demo_mode_disclaimer_dialog() -> None:
         """
         This prototype is currently configured for a **classroom live demo** on free-tier resources.
 
-        The following actions are temporarily disabled to keep the demo stable for all participants:
+        **Temporarily disabled features**
         - New Case creation
         - Document uploads
+        - Workflow actions (Process, Extract, Tasks, Letter, Packet)
         - A-Score recomputation
-        - AI chat usage is limited during the demo
+
+        **AI chat remains available, with limits**
+        - Up to 6 messages/questions per session
+        - Cooldown between messages
 
         Two demo cases have been preloaded for viewing.
 
