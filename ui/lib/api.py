@@ -88,8 +88,19 @@ def fetch_health() -> tuple[dict[str, Any] | None, str | None]:
     return safe_call(api_get, "/health")
 
 
-def fetch_appealability(case_id: str) -> tuple[dict[str, Any] | None, str | None]:
-    return safe_call(api_get, f"/cases/{case_id}/appealability")
+def fetch_appealability(
+    case_id: str,
+    *,
+    recompute: bool = False,
+    cached_only: bool = False,
+) -> tuple[dict[str, Any] | None, str | None]:
+    params: list[str] = []
+    if recompute:
+        params.append("recompute=true")
+    if cached_only:
+        params.append("cached_only=true")
+    suffix = f"?{'&'.join(params)}" if params else ""
+    return safe_call(api_get, f"/cases/{case_id}/appealability{suffix}")
 
 
 def delete_case(case_id: str) -> tuple[dict[str, Any] | None, str | None]:

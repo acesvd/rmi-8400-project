@@ -241,8 +241,21 @@ def init_db() -> None:
             """
         )
 
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS appealability_cache (
+                case_id TEXT PRIMARY KEY,
+                fingerprint TEXT NOT NULL,
+                result_json TEXT NOT NULL,
+                computed_at TEXT NOT NULL,
+                FOREIGN KEY(case_id) REFERENCES cases(case_id) ON DELETE CASCADE
+            );
+            """
+        )
+
         cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_case_id ON documents(case_id);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_chunks_case_id ON chunks(case_id);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_tasks_case_id ON tasks(case_id);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_events_case_id ON events(case_id);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_appealability_cache_computed_at ON appealability_cache(computed_at);")
         _ensure_case_extractions_mode_column(conn)
