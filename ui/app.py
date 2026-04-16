@@ -7,7 +7,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from lib.feature_flags import is_chat_ui_enabled, is_demo_user_mode
+from lib.feature_flags import is_chat_ui_enabled, is_demo_mode, is_demo_user_mode
 
 UI_DIR = Path(__file__).parent.resolve()
 
@@ -18,9 +18,9 @@ ADMIN_PASSWORD_ENV = "CLAIMRIGHT_UI_ADMIN_PASSWORD"
 DEMO_USERNAME_ENV = "CLAIMRIGHT_UI_DEMO_USERNAME"
 DEMO_PASSWORD_ENV = "CLAIMRIGHT_UI_DEMO_PASSWORD"
 DEFAULT_ADMIN_USERNAME = "admin"
-DEFAULT_ADMIN_PASSWORD = "claimright"
+DEFAULT_ADMIN_PASSWORD = "claimright-admin"
 DEFAULT_DEMO_USERNAME = "demo"
-DEFAULT_DEMO_PASSWORD = "claimright-demo"
+DEFAULT_DEMO_PASSWORD = "claimright"
 HOME_PAGE = ("Home", ":material/home:")
 ABOUT_PAGE = ("About Us", ":material/info:")
 CREATE_ACCOUNT_PAGE = ("Create Account", ":material/person_add:")
@@ -56,6 +56,7 @@ def _render_demo_mode_disclaimer_dialog() -> None:
         - New Case creation
         - Document uploads
         - A-Score recomputation
+        - AI chat usage is limited during the demo
 
         Two demo cases have been preloaded for viewing.
 
@@ -169,13 +170,14 @@ def _render_login_page() -> None:
         else:
             st.error("Invalid username or password.")
 
-    if (
-        admin_username == DEFAULT_ADMIN_USERNAME
-        and admin_password == DEFAULT_ADMIN_PASSWORD
-        and demo_username == DEFAULT_DEMO_USERNAME
-        and demo_password == DEFAULT_DEMO_PASSWORD
-    ):
-        st.info("Default credentials: `admin` / `claimright` (admin), `demo` / `claimright-demo` (demo).")
+    if is_demo_mode():
+        st.info("Demo login credentials: `demo` / `claimright`.")
+    else:
+        st.info(
+            "Demo login credentials: `demo` / `claimright`.\n\n"
+            "Admin login credentials: `admin` / `claimright-admin`."
+        )
+    st.caption("Note: Admin role is fully unlocked and has access to all features.")
 
     st.divider()
     st.caption("Don't have an account yet?")

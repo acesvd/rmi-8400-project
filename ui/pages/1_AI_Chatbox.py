@@ -812,6 +812,12 @@ def main() -> None:
         """,
         unsafe_allow_html=True,
     )
+    if demo_mode:
+        st.info(
+            "Demo account notice: Chat has live-demo usage limits. "
+            "You can send up to 6 messages/questions per session, with a cooldown between messages. "
+            "If you hit a limit, wait a bit and try again."
+        )
     nav_spacer, nav_col = st.columns([4, 1.3], gap="small")
     with nav_col:
         if st.button(
