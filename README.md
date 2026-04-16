@@ -61,6 +61,7 @@ Set these in Streamlit Community Cloud secrets:
 - `APPEALS_API_TIMEOUT`
 - `CLAIMRIGHT_UI_USERNAME`
 - `CLAIMRIGHT_UI_PASSWORD`
+- `DEMO_MODE` (`true` or `false`)
 
 Example backend model config (Ollama Cloud API):
 
@@ -70,6 +71,36 @@ APPEALS_OLLAMA_CHAT_MODEL=gpt-oss:20b
 APPEALS_OLLAMA_EXTRACT_MODEL=gpt-oss:20b
 APPEALS_OLLAMA_LETTER_MODEL=gpt-oss:20b
 ```
+
+## Demo Mode Toggle + Disclaimer
+
+This branch includes a UI demo lock for classroom presentations.
+
+- `DEMO_MODE=true`:
+  - Disables `New Case` actions
+  - Disables document upload controls
+  - Disables `Compute/Recompute A-Score`
+  - Shows a modal disclaimer after login in `ui/app.py`
+- `DEMO_MODE=false`:
+  - Restores normal UI behavior
+
+Current implementation defaults to demo mode if `DEMO_MODE` is not set:
+
+```bash
+DEMO_MODE=true
+```
+
+For a full interactive run, set this in Streamlit secrets:
+
+```bash
+DEMO_MODE=false
+```
+
+Disclaimer text shown in demo mode:
+
+- Prototype is configured for classroom live demo on free-tier resources.
+- New Case, Upload, and A-Score recomputation are temporarily disabled.
+- Two demo cases are preloaded for viewing.
 
 ## Cloud Deployment Flow (This Branch)
 

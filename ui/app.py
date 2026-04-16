@@ -43,12 +43,14 @@ def _ensure_auth_state() -> None:
 def _render_demo_mode_disclaimer_dialog() -> None:
     st.markdown(
         """
-        This deployment is configured for a **classroom live demo** on free-tier resources.
+        This prototype is currently configured for a **classroom live demo** on free-tier resources.
 
         The following actions are temporarily disabled to keep the demo stable for all participants:
         - New Case creation
         - Document uploads
         - A-Score recomputation
+
+        Two demo cases have been preloaded for viewing.
 
         Full workflow behavior remains available outside demo mode.
         """
