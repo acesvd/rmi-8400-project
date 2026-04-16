@@ -6,4 +6,4 @@ __pycache__/
 backend/storage/appeals_os.db
 backend/storage/uploads/
 backend/storage/artifacts/
-.streamlit/
+
