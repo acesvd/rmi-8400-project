@@ -5,6 +5,7 @@ from html import escape
 import re
 import time
 from typing import Any
+from uuid import uuid4
 
 import streamlit as st
 
@@ -19,9 +20,11 @@ from lib.api import (
     select_case,
 )
 from lib.components import render_sources
-from lib.feature_flags import is_demo_mode
+from lib.feature_flags import is_chat_ui_enabled, is_demo_user_mode
 
 CHAT_MODES = {"select", "general"}
+CHAT_SESSION_KEY = "chat_session_id"
+CHAT_ROLES = {"admin", "demo"}
 
 
 def _inject_page_styles() -> None:
@@ -435,7 +438,7 @@ def _mode_label(mode: str | None) -> str:
 
 
 def _render_mode_choice(cases: list[dict[str, Any]], cases_err: str | None) -> None:
-    demo_mode = is_demo_mode()
+    demo_mode = is_demo_user_mode()
     st.markdown('<p class="section-label">Choose Chat Type</p>', unsafe_allow_html=True)
     st.markdown("### Start Here")
 
@@ -519,6 +522,22 @@ def _reason_label(label: str | None) -> str:
     if not normalized:
         return "Unspecified"
     return normalized.replace("_", " ").title()
+
+
+def _get_chat_session_id() -> str:
+    session_id = st.session_state.get(CHAT_SESSION_KEY)
+    if session_id:
+        return str(session_id)
+    session_id = f"chat_{uuid4().hex}"
+    st.session_state[CHAT_SESSION_KEY] = session_id
+    return session_id
+
+
+def _get_chat_user_role() -> str:
+    role = str(st.session_state.get("auth_role") or "demo").strip().lower()
+    if role not in CHAT_ROLES:
+        return "demo"
+    return role
 
 
 def _render_case_context(case_payload: dict[str, Any]) -> None:
@@ -617,18 +636,24 @@ def _render_case_context(case_payload: dict[str, Any]) -> None:
 
 
 def _ask_case_question(case_id: str, question: str) -> tuple[dict[str, Any] | None, str | None]:
+    session_id = _get_chat_session_id()
+    user_role = _get_chat_user_role()
     return safe_call(
         api_post,
         f"/cases/{case_id}/chat",
-        json_body={"question": question},
+        json_body={"question": question, "session_id": session_id, "user_role": user_role},
+        headers={"X-Chat-Session-Id": session_id, "X-User-Role": user_role},
     )
 
 
 def _ask_general_question(question: str) -> tuple[dict[str, Any] | None, str | None]:
+    session_id = _get_chat_session_id()
+    user_role = _get_chat_user_role()
     body, err = safe_call(
         api_post,
         "/chat",
-        json_body={"question": question},
+        json_body={"question": question, "session_id": session_id, "user_role": user_role},
+        headers={"X-Chat-Session-Id": session_id, "X-User-Role": user_role},
     )
     if err and "/chat" in err and "404" in err:
         return (
@@ -761,7 +786,19 @@ def main() -> None:
     st.set_page_config(page_title="AI Chatbox", page_icon="💬", layout="wide")
     ensure_state()
     _inject_page_styles()
-    demo_mode = is_demo_mode()
+    chat_ui_enabled = is_chat_ui_enabled()
+    demo_mode = is_demo_user_mode()
+
+    if not chat_ui_enabled:
+        st.warning("Chat is temporarily disabled by the presenter for this demo.")
+        if st.button(
+            "Back to Dashboard",
+            icon=":material/dashboard:",
+            key="chat_disabled_back_dashboard_btn",
+            use_container_width=True,
+        ):
+            st.switch_page("pages/2_My_Cases.py")
+        st.stop()
 
     st.session_state.setdefault("chat_entry_mode", None)
 

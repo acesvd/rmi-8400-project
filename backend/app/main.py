@@ -2,15 +2,25 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
+import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from .config import ARTIFACT_DIR, UPLOAD_DIR
+from .config import (
+    ARTIFACT_DIR,
+    CHAT_COOLDOWN_SECONDS,
+    CHAT_ENABLED,
+    CHAT_SESSION_MAX_REQUESTS,
+    CHAT_SESSION_TTL_SECONDS,
+    DEMO_MODE,
+    UPLOAD_DIR,
+)
 from .database import get_conn, init_db
 from .schemas import (
     ChatRequest,
@@ -33,6 +43,9 @@ from .services.utils import new_id, parse_json, safe_filename, utc_now_iso
 
 APP_NAME = "Claims Appeal OS API"
 APP_VERSION = "0.1.0"
+CHAT_SESSION_ID_SANITIZER = re.compile(r"[^a-zA-Z0-9_.:-]")
+CHAT_ROLE_SANITIZER = re.compile(r"[^a-zA-Z]")
+CHAT_ROLES = {"admin", "demo"}
 
 app = FastAPI(title=APP_NAME, version=APP_VERSION)
 app.add_middleware(
@@ -273,6 +286,150 @@ def _save_appealability_cache(
         ),
     )
     return computed_at
+
+
+def _normalize_chat_session_id(raw: str | None) -> str:
+    text = (raw or "").strip()
+    if not text:
+        return ""
+    sanitized = CHAT_SESSION_ID_SANITIZER.sub("", text)
+    return sanitized[:128]
+
+
+def _extract_chat_session_id(request: Request, body: ChatRequest) -> str:
+    header_value = request.headers.get("x-chat-session-id") or request.headers.get("x-session-id")
+    return _normalize_chat_session_id(body.session_id or header_value)
+
+
+def _normalize_chat_user_role(raw: str | None) -> str:
+    text = (raw or "").strip().lower()
+    if not text:
+        return "demo"
+    sanitized = CHAT_ROLE_SANITIZER.sub("", text)
+    if sanitized in CHAT_ROLES:
+        return sanitized
+    return "demo"
+
+
+def _extract_chat_user_role(request: Request, body: ChatRequest) -> str:
+    header_value = request.headers.get("x-user-role") or request.headers.get("x-chat-user-role")
+    return _normalize_chat_user_role(body.user_role or header_value)
+
+
+def _enforce_chat_guardrails(conn, *, request: Request, body: ChatRequest) -> dict[str, Any]:
+    if not CHAT_ENABLED:
+        raise HTTPException(status_code=503, detail="Chat is temporarily disabled.")
+
+    user_role = _extract_chat_user_role(request, body)
+    session_limits_enabled = CHAT_COOLDOWN_SECONDS > 0 or CHAT_SESSION_MAX_REQUESTS > 0
+    session_id = _extract_chat_session_id(request, body)
+
+    if not DEMO_MODE:
+        return {
+            "chat_enabled": True,
+            "demo_mode": False,
+            "user_role": user_role,
+            "guardrails_applied": False,
+            "session_id": session_id or None,
+            "cooldown_seconds": CHAT_COOLDOWN_SECONDS,
+            "session_max_requests": CHAT_SESSION_MAX_REQUESTS if CHAT_SESSION_MAX_REQUESTS > 0 else None,
+            "session_remaining_requests": None,
+        }
+
+    if user_role == "admin":
+        return {
+            "chat_enabled": True,
+            "demo_mode": True,
+            "user_role": user_role,
+            "guardrails_applied": False,
+            "session_id": session_id or None,
+            "cooldown_seconds": CHAT_COOLDOWN_SECONDS,
+            "session_max_requests": CHAT_SESSION_MAX_REQUESTS if CHAT_SESSION_MAX_REQUESTS > 0 else None,
+            "session_remaining_requests": None,
+        }
+
+    if not session_limits_enabled:
+        return {
+            "chat_enabled": True,
+            "demo_mode": DEMO_MODE,
+            "user_role": user_role,
+            "guardrails_applied": True,
+            "session_id": session_id or None,
+            "cooldown_seconds": CHAT_COOLDOWN_SECONDS,
+            "session_max_requests": CHAT_SESSION_MAX_REQUESTS if CHAT_SESSION_MAX_REQUESTS > 0 else None,
+            "session_remaining_requests": None,
+        }
+
+    if not session_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing chat session id. Send `session_id` in request body or `X-Chat-Session-Id` header.",
+        )
+
+    now_epoch = time.time()
+    now_iso = utc_now_iso()
+    stale_cutoff = now_epoch - CHAT_SESSION_TTL_SECONDS
+    conn.execute("DELETE FROM chat_session_usage WHERE last_request_epoch < ?", (stale_cutoff,))
+    row = conn.execute(
+        "SELECT request_count, last_request_epoch FROM chat_session_usage WHERE session_id = ?",
+        (session_id,),
+    ).fetchone()
+
+    prior_count = int(row["request_count"]) if row else 0
+    last_request_epoch = float(row["last_request_epoch"] or 0.0) if row else 0.0
+
+    if row and CHAT_COOLDOWN_SECONDS > 0:
+        elapsed = now_epoch - last_request_epoch
+        if elapsed < CHAT_COOLDOWN_SECONDS:
+            wait_seconds = int(CHAT_COOLDOWN_SECONDS - elapsed + 0.999)
+            raise HTTPException(
+                status_code=429,
+                detail=f"Chat cooldown active. Please wait {wait_seconds} second(s) before sending another message.",
+            )
+
+    new_count = prior_count + 1
+    if CHAT_SESSION_MAX_REQUESTS > 0 and new_count > CHAT_SESSION_MAX_REQUESTS:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"Session chat limit reached ({CHAT_SESSION_MAX_REQUESTS} message(s)). "
+                "Start a new browser session to continue."
+            ),
+        )
+
+    if row:
+        conn.execute(
+            """
+            UPDATE chat_session_usage
+            SET request_count = ?, last_request_at = ?, last_request_epoch = ?
+            WHERE session_id = ?
+            """,
+            (new_count, now_iso, now_epoch, session_id),
+        )
+    else:
+        conn.execute(
+            """
+            INSERT INTO chat_session_usage (
+                session_id, request_count, first_request_at, last_request_at, last_request_epoch
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (session_id, new_count, now_iso, now_iso, now_epoch),
+        )
+
+    remaining = None
+    if CHAT_SESSION_MAX_REQUESTS > 0:
+        remaining = max(0, CHAT_SESSION_MAX_REQUESTS - new_count)
+    return {
+        "chat_enabled": True,
+        "demo_mode": DEMO_MODE,
+        "user_role": user_role,
+        "guardrails_applied": True,
+        "session_id": session_id,
+        "cooldown_seconds": CHAT_COOLDOWN_SECONDS,
+        "session_max_requests": CHAT_SESSION_MAX_REQUESTS if CHAT_SESSION_MAX_REQUESTS > 0 else None,
+        "session_remaining_requests": remaining,
+    }
 
 
 @app.get("/health")
@@ -661,7 +818,10 @@ def create_packet(case_id: str, body: PacketRequest) -> dict[str, Any]:
 
 
 @app.post("/chat")
-def general_chat(body: ChatRequest) -> dict[str, Any]:
+def general_chat(body: ChatRequest, request: Request) -> dict[str, Any]:
+    with get_conn() as conn:
+        limit_state = _enforce_chat_guardrails(conn, request=request, body=body)
+
     warning = (
         "This is general guidance without case-specific context. "
         "Create or select a case for personalized appeal support."
@@ -676,6 +836,7 @@ def general_chat(body: ChatRequest) -> dict[str, Any]:
             "sources": [],
             "mode": "general_fallback",
             "warning": warning,
+            "limits": limit_state,
         }
 
     messages = [
@@ -701,6 +862,7 @@ def general_chat(body: ChatRequest) -> dict[str, Any]:
             "sources": [],
             "mode": "general_error",
             "warning": warning,
+            "limits": limit_state,
         }
 
     if not answer:
@@ -711,14 +873,17 @@ def general_chat(body: ChatRequest) -> dict[str, Any]:
         "sources": [],
         "mode": "general",
         "warning": warning,
+        "limits": limit_state,
     }
 
 
 @app.post("/cases/{case_id}/chat")
-def case_chat(case_id: str, body: ChatRequest) -> dict[str, Any]:
+def case_chat(case_id: str, body: ChatRequest, request: Request) -> dict[str, Any]:
     with get_conn() as conn:
         _require_case(conn, case_id)
+        limit_state = _enforce_chat_guardrails(conn, request=request, body=body)
         response = answer_case_question(conn, case_id=case_id, question=body.question)
+        response["limits"] = limit_state
     return response
 
 

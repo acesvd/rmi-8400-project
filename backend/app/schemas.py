@@ -98,6 +98,8 @@ class PacketRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     question: str = Field(min_length=1)
+    session_id: str | None = Field(default=None, max_length=128)
+    user_role: str | None = Field(default=None, max_length=32)
 
 
 class ChatResponse(BaseModel):

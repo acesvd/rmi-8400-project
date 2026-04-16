@@ -253,9 +253,22 @@ def init_db() -> None:
             """
         )
 
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_session_usage (
+                session_id TEXT PRIMARY KEY,
+                request_count INTEGER NOT NULL,
+                first_request_at TEXT NOT NULL,
+                last_request_at TEXT NOT NULL,
+                last_request_epoch REAL NOT NULL
+            );
+            """
+        )
+
         cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_case_id ON documents(case_id);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_chunks_case_id ON chunks(case_id);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_tasks_case_id ON tasks(case_id);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_events_case_id ON events(case_id);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_appealability_cache_computed_at ON appealability_cache(computed_at);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_chat_session_last_epoch ON chat_session_usage(last_request_epoch);")
         _ensure_case_extractions_mode_column(conn)

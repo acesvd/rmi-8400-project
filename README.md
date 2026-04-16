@@ -54,14 +54,22 @@ Set these on Cloud Run for backend:
 - `APPEALS_OLLAMA_EXTRACT_MODEL`
 - `APPEALS_OLLAMA_LETTER_MODEL`
 - `APPEALS_OLLAMA_TIMEOUT`
+- `APPEALS_DEMO_MODE`
+- `APPEALS_CHAT_ENABLED`
+- `APPEALS_CHAT_COOLDOWN_SECONDS`
+- `APPEALS_CHAT_SESSION_MAX_REQUESTS`
+- `APPEALS_CHAT_SESSION_TTL_SECONDS`
 
 Set these in Streamlit Community Cloud secrets:
 
 - `APPEALS_API_URL`
 - `APPEALS_API_TIMEOUT`
-- `CLAIMRIGHT_UI_USERNAME`
-- `CLAIMRIGHT_UI_PASSWORD`
+- `CLAIMRIGHT_UI_ADMIN_USERNAME`
+- `CLAIMRIGHT_UI_ADMIN_PASSWORD`
+- `CLAIMRIGHT_UI_DEMO_USERNAME`
+- `CLAIMRIGHT_UI_DEMO_PASSWORD`
 - `DEMO_MODE` (`true` or `false`)
+- `CHAT_UI_ENABLED` (`true` or `false`)
 
 Example backend model config (Ollama Cloud API):
 
@@ -72,17 +80,35 @@ APPEALS_OLLAMA_EXTRACT_MODEL=gpt-oss:20b
 APPEALS_OLLAMA_LETTER_MODEL=gpt-oss:20b
 ```
 
+Example backend chat guardrail config (viewer-friendly demo):
+
+```bash
+APPEALS_DEMO_MODE=true
+APPEALS_CHAT_ENABLED=true
+APPEALS_CHAT_COOLDOWN_SECONDS=12
+APPEALS_CHAT_SESSION_MAX_REQUESTS=6
+APPEALS_CHAT_SESSION_TTL_SECONDS=21600
+```
+
 ## Demo Mode Toggle + Disclaimer
 
 This branch includes a UI demo lock for classroom presentations.
 
 - `DEMO_MODE=true`:
-  - Disables `New Case` actions
-  - Disables document upload controls
-  - Disables `Compute/Recompute A-Score`
-  - Shows a modal disclaimer after login in `ui/app.py`
+  - Applies UI demo restrictions to `demo` role users:
+    - Disables `New Case` actions
+    - Disables document upload controls
+    - Disables `Compute/Recompute A-Score`
+    - Shows a modal disclaimer after login in `ui/app.py`
+  - `admin` role bypasses these UI restrictions
 - `DEMO_MODE=false`:
   - Restores normal UI behavior
+- `CHAT_UI_ENABLED=false`:
+  - Hides the AI Chatbox page from top navigation
+  - Blocks direct access to chat page with a presenter notice
+- `APPEALS_DEMO_MODE=true` (backend):
+  - Applies chat cooldown/session limits to `demo` role users
+  - `admin` role bypasses those limits (chat kill switch still applies)
 
 Current implementation defaults to demo mode if `DEMO_MODE` is not set:
 
@@ -94,11 +120,12 @@ For a full interactive run, set this in Streamlit secrets:
 
 ```bash
 DEMO_MODE=false
+CHAT_UI_ENABLED=true
 ```
 
 Disclaimer text shown in demo mode:
 
-- Prototype is configured for classroom live demo on free-tier resources.
+- Prototype is currently configured for classroom live demo on free-tier resources.
 - New Case, Upload, and A-Score recomputation are temporarily disabled.
 - Two demo cases are preloaded for viewing.
 
@@ -129,7 +156,7 @@ gcloud run deploy "$SERVICE" \
 
 ```bash
 gcloud run services update "$SERVICE" --region "$REGION" \
-  --update-env-vars APPEALS_DATABASE_URL="<postgres-url>",APPEALS_OLLAMA_BASE_URL="https://ollama.com",APPEALS_OLLAMA_API_KEY="<key>",APPEALS_OLLAMA_CHAT_MODEL="gpt-oss:20b",APPEALS_OLLAMA_EXTRACT_MODEL="gpt-oss:20b",APPEALS_OLLAMA_LETTER_MODEL="gpt-oss:20b",APPEALS_OLLAMA_TIMEOUT="180"
+  --update-env-vars APPEALS_DATABASE_URL="<postgres-url>",APPEALS_OLLAMA_BASE_URL="https://ollama.com",APPEALS_OLLAMA_API_KEY="<key>",APPEALS_OLLAMA_CHAT_MODEL="gpt-oss:20b",APPEALS_OLLAMA_EXTRACT_MODEL="gpt-oss:20b",APPEALS_OLLAMA_LETTER_MODEL="gpt-oss:20b",APPEALS_OLLAMA_TIMEOUT="180",APPEALS_DEMO_MODE="true",APPEALS_CHAT_ENABLED="true",APPEALS_CHAT_COOLDOWN_SECONDS="12",APPEALS_CHAT_SESSION_MAX_REQUESTS="6",APPEALS_CHAT_SESSION_TTL_SECONDS="21600"
 ```
 
 ### 3) Set Streamlit app to this branch

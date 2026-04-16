@@ -7,14 +7,20 @@ from pathlib import Path
 
 import streamlit as st
 
-from lib.feature_flags import is_demo_mode
+from lib.feature_flags import is_chat_ui_enabled, is_demo_user_mode
 
 UI_DIR = Path(__file__).parent.resolve()
 
 APP_USERNAME_ENV = "CLAIMRIGHT_UI_USERNAME"
 APP_PASSWORD_ENV = "CLAIMRIGHT_UI_PASSWORD"
-DEFAULT_USERNAME = "admin"
-DEFAULT_PASSWORD = "claimright"
+ADMIN_USERNAME_ENV = "CLAIMRIGHT_UI_ADMIN_USERNAME"
+ADMIN_PASSWORD_ENV = "CLAIMRIGHT_UI_ADMIN_PASSWORD"
+DEMO_USERNAME_ENV = "CLAIMRIGHT_UI_DEMO_USERNAME"
+DEMO_PASSWORD_ENV = "CLAIMRIGHT_UI_DEMO_PASSWORD"
+DEFAULT_ADMIN_USERNAME = "admin"
+DEFAULT_ADMIN_PASSWORD = "claimright"
+DEFAULT_DEMO_USERNAME = "demo"
+DEFAULT_DEMO_PASSWORD = "claimright-demo"
 HOME_PAGE = ("Home", ":material/home:")
 ABOUT_PAGE = ("About Us", ":material/info:")
 CREATE_ACCOUNT_PAGE = ("Create Account", ":material/person_add:")
@@ -32,6 +38,7 @@ PROTECTED_PAGES = [
 def _ensure_auth_state() -> None:
     st.session_state.setdefault("is_authenticated", False)
     st.session_state.setdefault("auth_username", "")
+    st.session_state.setdefault("auth_role", "")
     st.session_state.setdefault("redirect_to_cases_after_login", False)
     st.session_state.setdefault("redirect_to_login", False)
     st.session_state.setdefault("show_create_account_form", False)
@@ -83,10 +90,19 @@ def _run_about_page() -> None:
     _run_page_main("about.py")
 
 
-def _configured_credentials() -> tuple[str, str]:
-    expected_username = os.getenv(APP_USERNAME_ENV, DEFAULT_USERNAME)
-    expected_password = os.getenv(APP_PASSWORD_ENV, DEFAULT_PASSWORD)
-    return expected_username, expected_password
+def _configured_credentials() -> dict[str, tuple[str, str]]:
+    legacy_username = os.getenv(APP_USERNAME_ENV)
+    legacy_password = os.getenv(APP_PASSWORD_ENV)
+
+    admin_username = os.getenv(ADMIN_USERNAME_ENV, DEFAULT_ADMIN_USERNAME)
+    admin_password = os.getenv(ADMIN_PASSWORD_ENV, DEFAULT_ADMIN_PASSWORD)
+    demo_username = os.getenv(DEMO_USERNAME_ENV, legacy_username or DEFAULT_DEMO_USERNAME)
+    demo_password = os.getenv(DEMO_PASSWORD_ENV, legacy_password or DEFAULT_DEMO_PASSWORD)
+
+    return {
+        "admin": (admin_username, admin_password),
+        "demo": (demo_username, demo_password),
+    }
 
 
 def _render_login_page() -> None:
@@ -125,7 +141,9 @@ def _render_login_page() -> None:
 
     st.title("Log In")
     st.caption("Sign in to access My Cases, AI Chatbox, and A-Score.")
-    expected_username, expected_password = _configured_credentials()
+    credentials = _configured_credentials()
+    admin_username, admin_password = credentials["admin"]
+    demo_username, demo_password = credentials["demo"]
 
     with st.form("login_form"):
         username = st.text_input("Username")
@@ -133,11 +151,17 @@ def _render_login_page() -> None:
         submitted = st.form_submit_button("Log In", use_container_width=True)
 
     if submitted:
-        username_ok = hmac.compare_digest(username.strip(), expected_username)
-        password_ok = hmac.compare_digest(password, expected_password)
-        if username_ok and password_ok:
+        clean_username = username.strip()
+        role: str | None = None
+        if hmac.compare_digest(clean_username, admin_username) and hmac.compare_digest(password, admin_password):
+            role = "admin"
+        elif hmac.compare_digest(clean_username, demo_username) and hmac.compare_digest(password, demo_password):
+            role = "demo"
+
+        if role:
             st.session_state["is_authenticated"] = True
-            st.session_state["auth_username"] = username.strip()
+            st.session_state["auth_username"] = clean_username
+            st.session_state["auth_role"] = role
             st.session_state["redirect_to_cases_after_login"] = True
             st.session_state["redirect_to_login"] = False
             st.session_state[DEMO_DISCLAIMER_SEEN_KEY] = False
@@ -145,8 +169,13 @@ def _render_login_page() -> None:
         else:
             st.error("Invalid username or password.")
 
-    if expected_username == DEFAULT_USERNAME and expected_password == DEFAULT_PASSWORD:
-        st.info("Demo login credentials: `admin` / `claimright`.")
+    if (
+        admin_username == DEFAULT_ADMIN_USERNAME
+        and admin_password == DEFAULT_ADMIN_PASSWORD
+        and demo_username == DEFAULT_DEMO_USERNAME
+        and demo_password == DEFAULT_DEMO_PASSWORD
+    ):
+        st.info("Default credentials: `admin` / `claimright` (admin), `demo` / `claimright-demo` (demo).")
 
     st.divider()
     st.caption("Don't have an account yet?")
@@ -158,6 +187,7 @@ def _render_login_page() -> None:
 def _run_logout_page() -> None:
     st.session_state["is_authenticated"] = False
     st.session_state["auth_username"] = ""
+    st.session_state["auth_role"] = ""
     st.session_state["show_create_account_form"] = False
     st.session_state["redirect_to_home"] = True
     st.session_state[DEMO_DISCLAIMER_SEEN_KEY] = False
@@ -167,7 +197,8 @@ def _run_logout_page() -> None:
 def main() -> None:
     _ensure_auth_state()
     ui_dir = Path(__file__).parent
-    demo_mode = is_demo_mode()
+    demo_user_mode = is_demo_user_mode()
+    chat_ui_enabled = is_chat_ui_enabled()
 
     st.logo(
         str(ui_dir / "assets" / "logo.png"),
@@ -271,7 +302,7 @@ def main() -> None:
     )
 
     is_authenticated = bool(st.session_state.get("is_authenticated"))
-    if demo_mode and is_authenticated and not bool(st.session_state.get(DEMO_DISCLAIMER_SEEN_KEY)):
+    if demo_user_mode and is_authenticated and not bool(st.session_state.get(DEMO_DISCLAIMER_SEEN_KEY)):
         _render_demo_mode_disclaimer_dialog()
         return
 
@@ -282,11 +313,15 @@ def main() -> None:
     nav_pages: list[st.Page] | dict[str, list[st.Page]]
 
     if is_authenticated:
+        protected_page_defs = list(PROTECTED_PAGES)
+        if not chat_ui_enabled:
+            protected_page_defs = [item for item in protected_page_defs if item[1] != "AI Chatbox"]
+
         protected_pages = [
-            st.Page(PROTECTED_PAGES[0][0], title="Dashboard", icon=PROTECTED_PAGES[0][2], default=True),
+            st.Page(protected_page_defs[0][0], title="Dashboard", icon=protected_page_defs[0][2], default=True),
             *[
                 st.Page(page_path, title=page_title, icon=page_icon, default=False)
-                for page_path, page_title, page_icon in PROTECTED_PAGES[1:]
+                for page_path, page_title, page_icon in protected_page_defs[1:]
             ],
         ]
         logout_page = st.Page(_run_logout_page, title="Log Out", icon=":material/logout:", default=False)

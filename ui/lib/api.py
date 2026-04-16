@@ -22,8 +22,15 @@ def api_get(path: str):
     return r.json()
 
 
-def api_post(path: str, *, json_body: dict[str, Any] | None = None, files=None, data=None):
-    r = requests.post(f"{API_BASE}{path}", json=json_body, files=files, data=data, timeout=TIMEOUT)
+def api_post(
+    path: str,
+    *,
+    json_body: dict[str, Any] | None = None,
+    files=None,
+    data=None,
+    headers: dict[str, str] | None = None,
+):
+    r = requests.post(f"{API_BASE}{path}", json=json_body, files=files, data=data, headers=headers, timeout=TIMEOUT)
     r.raise_for_status()
     return r.json()
 

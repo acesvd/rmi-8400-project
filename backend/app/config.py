@@ -11,6 +11,13 @@ ARTIFACT_DIR = STORAGE_DIR / "artifacts"
 DB_PATH = Path(os.getenv("APPEALS_DB_PATH", BASE_DIR / "storage" / "appeals_os.db"))
 DATABASE_URL = os.getenv("APPEALS_DATABASE_URL", "").strip()
 
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
 def _normalize_ollama_base_url(raw: str) -> str:
     value = (raw or "").strip().rstrip("/")
     if not value:
@@ -31,6 +38,13 @@ OLLAMA_CHAT_MODEL = os.getenv("APPEALS_OLLAMA_CHAT_MODEL", "llama3.1")
 OLLAMA_EXTRACT_MODEL = os.getenv("APPEALS_OLLAMA_EXTRACT_MODEL", OLLAMA_CHAT_MODEL)
 OLLAMA_LETTER_MODEL = os.getenv("APPEALS_OLLAMA_LETTER_MODEL", OLLAMA_CHAT_MODEL)
 OLLAMA_TIMEOUT_SECONDS = int(os.getenv("APPEALS_OLLAMA_TIMEOUT", "180"))
+
+# Chat safety controls for live demos / free-tier protection.
+DEMO_MODE = _env_bool("APPEALS_DEMO_MODE", False)
+CHAT_ENABLED = _env_bool("APPEALS_CHAT_ENABLED", True)
+CHAT_COOLDOWN_SECONDS = max(0, int(os.getenv("APPEALS_CHAT_COOLDOWN_SECONDS", "12")))
+CHAT_SESSION_MAX_REQUESTS = max(0, int(os.getenv("APPEALS_CHAT_SESSION_MAX_REQUESTS", "6")))
+CHAT_SESSION_TTL_SECONDS = max(60, int(os.getenv("APPEALS_CHAT_SESSION_TTL_SECONDS", "21600")))
 
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)

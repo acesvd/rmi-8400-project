@@ -8,7 +8,7 @@ from typing import Any
 import streamlit as st
 
 from lib.api import ensure_state, fetch_appealability, fetch_case_payload, fetch_cases, select_case
-from lib.feature_flags import is_demo_mode
+from lib.feature_flags import is_demo_user_mode
 
 
 def _inject_styles() -> None:
@@ -576,7 +576,7 @@ def main() -> None:
     st.set_page_config(page_title="A-Score Dashboard", page_icon="📊", layout="wide")
     ensure_state()
     _inject_styles()
-    demo_mode = is_demo_mode()
+    demo_mode = is_demo_user_mode()
 
     st.markdown(
         """

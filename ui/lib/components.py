@@ -15,7 +15,7 @@ from .api import (
     api_post,
     safe_call,
 )
-from .feature_flags import is_demo_mode
+from .feature_flags import is_demo_user_mode
 
 
 def render_sources(sources: list[dict[str, Any]]) -> None:
@@ -822,7 +822,7 @@ def render_upload_documents_card(case_id: str | None, *, key_prefix: str) -> Non
         st.caption("Select a case to upload documents.")
         return
 
-    demo_mode = is_demo_mode()
+    demo_mode = is_demo_user_mode()
 
     with st.container(border=True):
         st.markdown("### Upload Documents")

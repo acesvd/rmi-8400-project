@@ -14,7 +14,7 @@ from lib.api import (
     open_case_workspace_create_flow,
     safe_call,
 )
-from lib.feature_flags import is_demo_mode
+from lib.feature_flags import is_demo_user_mode
 
 
 def _inject_page_styles() -> None:
@@ -1294,7 +1294,7 @@ def main() -> None:
     st.set_page_config(page_title="My Cases", page_icon="📁", layout="wide")
     ensure_state()
     _inject_page_styles()
-    demo_mode = is_demo_mode()
+    demo_mode = is_demo_user_mode()
 
     cases, cases_err = fetch_cases()
     cases = cases or []

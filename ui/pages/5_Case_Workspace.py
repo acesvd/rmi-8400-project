@@ -25,7 +25,7 @@ from lib.components import (
     render_tracking_table,
     render_workflow_actions_card,
 )
-from lib.feature_flags import is_demo_mode
+from lib.feature_flags import is_demo_user_mode
 
 WORKSPACE_FLOW_KEY = "case_workspace_flow"
 WORKSPACE_PENDING_TITLE_KEY = "case_workspace_pending_title"
@@ -534,7 +534,7 @@ def _upload_document_to_case(
 
 
 def _render_entry_screen(cases: list[dict]) -> None:
-    demo_mode = is_demo_mode()
+    demo_mode = is_demo_user_mode()
     st.markdown('<p class="section-label">Start Here</p>', unsafe_allow_html=True)
     st.subheader("Create a new case or continue an existing one")
     st.caption("Choose one path to enter the workspace flow.")
@@ -577,7 +577,7 @@ def _render_entry_screen(cases: list[dict]) -> None:
 
 
 def _render_create_case_setup(cases: list[dict]) -> None:
-    demo_mode = is_demo_mode()
+    demo_mode = is_demo_user_mode()
     st.markdown('<p class="section-label">Create Flow</p>', unsafe_allow_html=True)
     st.subheader("Create a case and add initial context")
 
@@ -917,7 +917,7 @@ def _render_workspace_content(case_id: str, case_payload: dict) -> None:
 
 
 def _render_active_workspace(cases: list[dict]) -> None:
-    demo_mode = is_demo_mode()
+    demo_mode = is_demo_user_mode()
     st.markdown('<p class="section-label">Select</p>', unsafe_allow_html=True)
     st.subheader("Case Selection")
     st.caption("Pick a case to load the workspace and continue execution.")
