@@ -16,7 +16,9 @@ Called by:
 from __future__ import annotations
 
 import csv
+import difflib
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -977,6 +979,88 @@ def _get_s1_categories() -> tuple[list[str], list[str]]:
     return sorted(diags), sorted(treats)
 
 
+def _normalize_category_text(value: Any) -> str:
+    return "".join(ch for ch in str(value or "").lower() if ch.isalnum())
+
+
+def _category_tokens(value: Any) -> set[str]:
+    return {tok for tok in re.split(r"[^a-z0-9]+", str(value or "").lower()) if len(tok) >= 3}
+
+
+def _best_category_match(raw_value: Any, categories: list[str]) -> str | None:
+    """Map model/free-text category output onto canonical S1 categories."""
+    raw_text = str(raw_value or "").strip()
+    if not raw_text:
+        return None
+
+    if raw_text in categories:
+        return raw_text
+
+    by_norm: dict[str, str] = {}
+    for cat in categories:
+        norm = _normalize_category_text(cat)
+        if norm and norm not in by_norm:
+            by_norm[norm] = cat
+
+    raw_norm = _normalize_category_text(raw_text)
+    if raw_norm in by_norm:
+        return by_norm[raw_norm]
+
+    if raw_norm:
+        for norm, cat in by_norm.items():
+            if len(raw_norm) >= 5 and (raw_norm in norm or norm in raw_norm):
+                return cat
+
+    if raw_norm and by_norm:
+        close = difflib.get_close_matches(raw_norm, list(by_norm.keys()), n=1, cutoff=0.72)
+        if close:
+            return by_norm[close[0]]
+
+    raw_tokens = _category_tokens(raw_text)
+    best: str | None = None
+    best_score = 0.0
+    for cat in categories:
+        cat_tokens = _category_tokens(cat)
+        if not raw_tokens or not cat_tokens:
+            continue
+        overlap = len(raw_tokens & cat_tokens)
+        union = len(raw_tokens | cat_tokens)
+        score = overlap / union if union else 0.0
+        if score > best_score:
+            best_score = score
+            best = cat
+    if best and best_score >= 0.5:
+        return best
+    return None
+
+
+def _normalize_keyword_list(raw_keywords: Any) -> list[str]:
+    items: list[Any]
+    if isinstance(raw_keywords, list):
+        items = raw_keywords
+    elif isinstance(raw_keywords, str):
+        items = re.split(r"[,;\n|]", raw_keywords)
+    else:
+        return []
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        if isinstance(item, dict):
+            item = item.get("keyword") or item.get("term") or item.get("text") or ""
+        text = " ".join(str(item or "").strip().split())
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(text[:80])
+        if len(out) >= 10:
+            break
+    return out
+
+
 # Keyword map: common medical terms → S1 DiagnosisCategory
 _DIAG_KEYWORDS: dict[str, list[str]] = {
     "Cancer": ["cancer", "tumor", "oncolog", "carcinoma", "melanoma", "lymphoma",
@@ -1069,39 +1153,45 @@ def _classify_claim(
     # --- Try Ollama first ---
     try:
         from .llm import OllamaClient
-        from ..config import OLLAMA_CHAT_MODEL
+        from ..config import OLLAMA_EXTRACT_MODEL
         client = OllamaClient()
         if client.is_available():
+            diag_options = "\n".join(f"- {cat}" for cat in diag_cats)
+            treat_options = "\n".join(f"- {cat}" for cat in treat_cats)
             prompt = (
                 "You are a medical claim classifier. Given denial letter text, pick the BEST matching "
                 "DiagnosisCategory and TreatmentCategory from the lists below. "
                 "Also extract 5-10 medically relevant keywords (drug names, conditions, procedures). "
-                "Return ONLY a JSON object, no markdown.\n\n"
-                f"DiagnosisCategory options: {diag_cats}\n"
-                f"TreatmentCategory options: {treat_cats}\n\n"
-                f"Denial text: {all_text[:600]}\n\n"
-                'Return: {"diagnosis_category": "...", "treatment_category": "...", '
+                "Return ONLY a JSON object, no markdown.\n"
+                "Use an EXACT category string from the options when possible. "
+                "If unknown, return null for that field.\n\n"
+                f"DiagnosisCategory options:\n{diag_options}\n\n"
+                f"TreatmentCategory options:\n{treat_options}\n\n"
+                f"Denial text:\n{all_text[:2400]}\n\n"
+                'Return: {"diagnosis_category": "... or null", "treatment_category": "... or null", '
                 '"medical_keywords": ["...", "..."]}'
             )
             result = client.generate_json(
                 prompt=prompt,
-                model=OLLAMA_CHAT_MODEL,
+                model=OLLAMA_EXTRACT_MODEL,
                 temperature=0.0,
             )
-            diag = result.get("diagnosis_category")
-            treat = result.get("treatment_category")
-            keywords = result.get("medical_keywords", [])
-            # Validate against actual categories
-            if diag and diag not in diag_cats:
-                diag = None
-            if treat and treat not in treat_cats:
-                treat = None
-            if diag or treat:
+            raw_diag = result.get("diagnosis_category")
+            raw_treat = result.get("treatment_category")
+            diag = _best_category_match(raw_diag, diag_cats)
+            treat = _best_category_match(raw_treat, treat_cats)
+            keywords = _normalize_keyword_list(result.get("medical_keywords", []))
+
+            if diag or treat or keywords:
+                mapped = (
+                    (raw_diag and str(raw_diag).strip() != str(diag or ""))
+                    or (raw_treat and str(raw_treat).strip() != str(treat or ""))
+                )
                 return {
                     "diagnosis_category": diag,
                     "treatment_category": treat,
-                    "medical_keywords": keywords[:10] if isinstance(keywords, list) else [],
-                    "source": "ollama",
+                    "medical_keywords": keywords,
+                    "source": "ollama_mapped" if mapped else "ollama",
                 }
     except Exception as exc:
         logger.info("Claim classification Ollama failed: %s", exc)
@@ -1124,7 +1214,6 @@ def _classify_claim(
             best_treat = cat
 
     # Extract medical keywords (simple: words 6+ chars not in common English)
-    import re
     _COMMON = {"patient", "treatment", "medical", "request", "authorization", "coverage",
                "denied", "denial", "necessary", "review", "health", "service", "insurer",
                "insurance", "appeal", "letter", "document", "reason", "clinical",
@@ -1139,14 +1228,14 @@ def _classify_claim(
             break
 
     return {
-        "diagnosis_category": best_diag if best_diag_score >= 2 else None,
-        "treatment_category": best_treat if best_treat_score >= 1 else None,
-        "medical_keywords": med_keywords[:10],
+        "diagnosis_category": _best_category_match(best_diag if best_diag_score >= 2 else None, diag_cats),
+        "treatment_category": _best_category_match(best_treat if best_treat_score >= 1 else None, treat_cats),
+        "medical_keywords": _normalize_keyword_list(med_keywords[:10]),
         "source": "keywords",
     }
 
 
-def get_appealability(case_json: dict[str, Any]) -> dict[str, Any]:
+def get_appealability(case_json: dict[str, Any], *, chunk_texts: list[str] | None = None) -> dict[str, Any]:
     """Main entry point. Takes a case_json from case_extraction and returns
     a full appealability report.
 
@@ -1207,7 +1296,7 @@ def get_appealability(case_json: dict[str, Any]) -> dict[str, Any]:
         query_text = " ".join(query_parts)
 
         # Classify our claim into S1's DiagnosisCategory + TreatmentCategory
-        claim_class = _classify_claim(query_text)
+        claim_class = _classify_claim(query_text, chunk_texts=chunk_texts)
         inferred_diag = claim_class.get("diagnosis_category")
         inferred_treat = claim_class.get("treatment_category")
         medical_keywords = claim_class.get("medical_keywords", [])

@@ -50,7 +50,7 @@ def _ensure_auth_state() -> None:
 def _render_demo_mode_disclaimer_dialog() -> None:
     st.markdown(
         """
-        This prototype is currently configured for a **classroom live demo** on free-tier resources.
+        This prototype is currently configured for a **classroom live demo** on free-tier resources. To keep the demo experience smooth, responsive, and stable for everyone, some features have been temporarily disabled or limited.
 
         **Temporarily disabled features**
         - New Case creation
@@ -65,6 +65,8 @@ def _render_demo_mode_disclaimer_dialog() -> None:
         Two demo cases have been preloaded for viewing.
 
         Full workflow behavior remains available outside demo mode.
+        
+        Thank you for your understanding and enjoy exploring the demo!
         """
     )
     if st.button("I Understand", type="primary", use_container_width=True, key="demo_mode_disclaimer_ack_btn"):

@@ -1002,7 +1002,12 @@ def get_case_appealability(
                 )
 
         case_json = extraction.get("case_json", {})
-        result = get_appealability(case_json)
+        chunk_rows = conn.execute(
+            "SELECT text FROM chunks WHERE case_id = ? ORDER BY chunk_id LIMIT 120",
+            (case_id,),
+        ).fetchall()
+        chunk_texts = [str(row["text"] or "") for row in chunk_rows if str(row["text"] or "").strip()]
+        result = get_appealability(case_json, chunk_texts=chunk_texts)
         result["case_id"] = case_id
         computed_at = _save_appealability_cache(
             conn,
