@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir -U pip setuptools wheel \
 
 COPY backend/app /app/app
 COPY backend/storage /app/storage
+COPY data /data
 
 EXPOSE 8000
 
