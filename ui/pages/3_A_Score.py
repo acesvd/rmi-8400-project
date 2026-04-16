@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import re
 from typing import Any
 
@@ -257,69 +255,6 @@ def _inject_styles() -> None:
         """,
         unsafe_allow_html=True,
     )
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _count_by(items: list[dict[str, Any]], key: str) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for item in items:
-        value = str(item.get(key) or "unknown")
-        counts[value] = counts.get(value, 0) + 1
-    return counts
-
-
-def _latest_value(items: list[dict[str, Any]], key: str) -> str:
-    values = [str(item.get(key)) for item in items if item.get(key)]
-    return max(values) if values else ""
-
-
-def _case_payload_fingerprint(case_payload: dict[str, Any]) -> str:
-    case = case_payload.get("case") or {}
-    extraction = case_payload.get("extraction") or {}
-    documents = case_payload.get("documents") or []
-    tasks = case_payload.get("tasks") or []
-    artifacts = case_payload.get("artifacts") or []
-    events = case_payload.get("events") or []
-
-    projection = {
-        "case": {
-            "case_id": case.get("case_id"),
-            "status": case.get("status"),
-            "title": case.get("title"),
-            "updated_at": case.get("updated_at"),
-        },
-        "extraction": {
-            "extraction_id": extraction.get("extraction_id"),
-            "created_at": extraction.get("created_at"),
-            "mode": extraction.get("mode"),
-            "warnings_count": len(extraction.get("warnings") or []),
-        },
-        "documents": {
-            "count": len(documents),
-            "latest_uploaded_at": _latest_value(documents, "uploaded_at"),
-            "status_counts": _count_by(documents, "processed_status"),
-        },
-        "tasks": {
-            "count": len(tasks),
-            "latest_created_at": _latest_value(tasks, "created_at"),
-            "status_counts": _count_by(tasks, "status"),
-        },
-        "artifacts": {
-            "count": len(artifacts),
-            "latest_created_at": _latest_value(artifacts, "created_at"),
-            "type_counts": _count_by(artifacts, "type"),
-        },
-        "events": {
-            "count": len(events),
-            "latest_timestamp": _latest_value(events, "timestamp"),
-            "type_counts": _count_by(events, "type"),
-        },
-    }
-    canonical = json.dumps(projection, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _score_color(rate: float | None) -> str:
@@ -688,19 +623,13 @@ def main() -> None:
         st.warning("No extraction available. Upload a denial letter → Process → Extract first.")
         st.stop()
 
-    case_fingerprint = _case_payload_fingerprint(case_payload)
-    cache_by_case = st.session_state.setdefault("ascore_cache_by_case", {})
-    cached_entry = cache_by_case.get(case_id)
-    cache_valid = (
-        isinstance(cached_entry, dict)
-        and cached_entry.get("fingerprint") == case_fingerprint
-        and isinstance(cached_entry.get("appeal_data"), dict)
-    )
+    saved_data, saved_err = fetch_appealability(case_id, cached_only=True)
+    has_saved = isinstance(saved_data, dict)
 
     with compute_col:
         # Align with the selectbox input row while keeping the selector label visible.
         st.markdown("<div style='height:1.68rem;'></div>", unsafe_allow_html=True)
-        button_label = "Compute A-Score" if not cache_valid else "Recompute A-Score"
+        button_label = "Recompute A-Score" if has_saved else "Compute A-Score"
         compute_clicked = st.button(
             button_label,
             icon=":material/play_arrow:",
@@ -708,17 +637,21 @@ def main() -> None:
             key=f"ascore_compute_btn_{case_id}",
         )
 
-    if cache_valid:
-        st.caption("Showing cached results for this case. Click recompute if you want a fresh run.")
-    elif isinstance(cached_entry, dict):
-        st.caption("Case data changed since last run. Click compute to refresh scores.")
+    if has_saved:
+        cache_meta = saved_data.get("_cache", {}) if isinstance(saved_data, dict) else {}
+        if cache_meta.get("fresh", True):
+            st.caption("Showing saved results for this case. Click recompute if you want a fresh run.")
+        else:
+            st.caption("Showing previously saved results. Case data changed since last run; click recompute to refresh.")
+    elif saved_err and "404" not in saved_err:
+        st.warning(f"Could not load saved A-Score: {saved_err}")
     else:
-        st.caption("Select a case and click Compute A-Score to run the analysis.")
+        st.caption("Select a case and click Compute A-Score to run and save analysis.")
 
     appeal_data = None
     if compute_clicked:
         with st.spinner("Computing appealability score..."):
-            appeal_data, appeal_err = fetch_appealability(case_id)
+            appeal_data, appeal_err = fetch_appealability(case_id, recompute=has_saved)
 
         if appeal_err:
             st.error(f"Appealability computation failed: {appeal_err}")
@@ -726,15 +659,10 @@ def main() -> None:
         if not appeal_data:
             st.info("No appealability data available for this case.")
             st.stop()
-
-        cache_by_case[case_id] = {
-            "fingerprint": case_fingerprint,
-            "appeal_data": appeal_data,
-        }
-    elif cache_valid:
-        appeal_data = cached_entry["appeal_data"]
+    elif has_saved:
+        appeal_data = saved_data
     else:
-        st.info("Ready to run. Click `Compute A-Score` to generate this case's analysis.")
+        st.info("Ready to run. Click `Compute A-Score` to generate and save this case's analysis.")
         st.stop()
 
     # Unpack

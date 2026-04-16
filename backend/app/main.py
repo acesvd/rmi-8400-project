@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import shutil
 from pathlib import Path
 from typing import Any
@@ -167,6 +169,109 @@ def _manual_deadline_item(value: str) -> dict[str, Any]:
             "quote": "Manually entered by user.",
         },
     }
+
+
+def _scalar_value(row: Any) -> Any:
+    if row is None:
+        return None
+    try:
+        return row[0]
+    except Exception:
+        pass
+    if isinstance(row, dict):
+        for value in row.values():
+            return value
+    keys = getattr(row, "keys", None)
+    if callable(keys):
+        key_list = list(keys())
+        if key_list:
+            return row[key_list[0]]
+    return None
+
+
+def _case_fingerprint_for_appealability(conn, *, case_id: str, extraction: dict[str, Any]) -> str:
+    case_row = _require_case(conn, case_id)
+
+    docs_count = _scalar_value(conn.execute("SELECT COUNT(*) AS c FROM documents WHERE case_id = ?", (case_id,)).fetchone()) or 0
+    docs_latest = _scalar_value(
+        conn.execute("SELECT COALESCE(MAX(uploaded_at), '') AS latest FROM documents WHERE case_id = ?", (case_id,)).fetchone()
+    ) or ""
+
+    tasks_count = _scalar_value(conn.execute("SELECT COUNT(*) AS c FROM tasks WHERE case_id = ?", (case_id,)).fetchone()) or 0
+    tasks_latest = _scalar_value(
+        conn.execute("SELECT COALESCE(MAX(created_at), '') AS latest FROM tasks WHERE case_id = ?", (case_id,)).fetchone()
+    ) or ""
+
+    artifacts_count = _scalar_value(conn.execute("SELECT COUNT(*) AS c FROM artifacts WHERE case_id = ?", (case_id,)).fetchone()) or 0
+    artifacts_latest = _scalar_value(
+        conn.execute("SELECT COALESCE(MAX(created_at), '') AS latest FROM artifacts WHERE case_id = ?", (case_id,)).fetchone()
+    ) or ""
+
+    events_count = _scalar_value(conn.execute("SELECT COUNT(*) AS c FROM events WHERE case_id = ?", (case_id,)).fetchone()) or 0
+    events_latest = _scalar_value(
+        conn.execute("SELECT COALESCE(MAX(timestamp), '') AS latest FROM events WHERE case_id = ?", (case_id,)).fetchone()
+    ) or ""
+
+    payload = {
+        "case_id": case_id,
+        "case_updated_at": case_row["updated_at"],
+        "extraction_id": extraction.get("extraction_id"),
+        "extraction_created_at": extraction.get("created_at"),
+        "extraction_mode": extraction.get("mode"),
+        "documents": {"count": int(docs_count), "latest": str(docs_latest)},
+        "tasks": {"count": int(tasks_count), "latest": str(tasks_latest)},
+        "artifacts": {"count": int(artifacts_count), "latest": str(artifacts_latest)},
+        "events": {"count": int(events_count), "latest": str(events_latest)},
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _load_appealability_cache(
+    conn,
+    *,
+    case_id: str,
+    fingerprint: str,
+) -> tuple[dict[str, Any], bool, str] | None:
+    row = conn.execute(
+        "SELECT fingerprint, result_json, computed_at FROM appealability_cache WHERE case_id = ?",
+        (case_id,),
+    ).fetchone()
+    if not row:
+        return None
+
+    cached_data = parse_json(row["result_json"], None)
+    if not isinstance(cached_data, dict):
+        return None
+
+    cached_data["case_id"] = case_id
+    is_fresh = str(row["fingerprint"]) == fingerprint
+    computed_at = str(row["computed_at"] or "")
+    return cached_data, is_fresh, computed_at
+
+
+def _save_appealability_cache(
+    conn,
+    *,
+    case_id: str,
+    fingerprint: str,
+    result: dict[str, Any],
+) -> str:
+    computed_at = utc_now_iso()
+    conn.execute("DELETE FROM appealability_cache WHERE case_id = ?", (case_id,))
+    conn.execute(
+        """
+        INSERT INTO appealability_cache (case_id, fingerprint, result_json, computed_at)
+        VALUES (?, ?, ?, ?)
+        """,
+        (
+            case_id,
+            fingerprint,
+            json.dumps(result, ensure_ascii=True, separators=(",", ":")),
+            computed_at,
+        ),
+    )
+    return computed_at
 
 
 @app.get("/health")
@@ -689,23 +794,59 @@ def list_events(case_id: str) -> list[dict[str, Any]]:
 
 
 @app.get("/cases/{case_id}/appealability")
-def get_case_appealability(case_id: str) -> dict[str, Any]:
-    """Compute appealability score for a case using historical denial outcomes data.
+def get_case_appealability(
+    case_id: str,
+    recompute: bool = False,
+    cached_only: bool = False,
+) -> dict[str, Any]:
+    """Return cached or newly computed appealability score for a case.
 
     Requires extraction to have been run first (POST /cases/{case_id}/extract).
     Uses S1 (IMR overturn rates) for R1 denials and S3 (insurer benchmark) for R2 denials.
+    By default, returns saved score if present. Use `recompute=true` to force recomputation.
+    Use `cached_only=true` to fetch only previously saved results.
     """
     with get_conn() as conn:
         _require_case(conn, case_id)
         extraction = latest_case_extraction(conn, case_id)
 
-    if not extraction:
-        raise HTTPException(
-            status_code=400,
-            detail="No extraction found. Run POST /cases/{case_id}/extract first.",
-        )
+        if not extraction:
+            raise HTTPException(
+                status_code=400,
+                detail="No extraction found. Run POST /cases/{case_id}/extract first.",
+            )
 
-    case_json = extraction.get("case_json", {})
-    result = get_appealability(case_json)
-    result["case_id"] = case_id
-    return result
+        fingerprint = _case_fingerprint_for_appealability(conn, case_id=case_id, extraction=extraction)
+
+        if not recompute:
+            cached = _load_appealability_cache(conn, case_id=case_id, fingerprint=fingerprint)
+            if cached:
+                payload, is_fresh, computed_at = cached
+                payload["_cache"] = {
+                    "hit": True,
+                    "fresh": is_fresh,
+                    "computed_at": computed_at,
+                }
+                return payload
+
+            if cached_only:
+                raise HTTPException(
+                    status_code=404,
+                    detail="No saved appealability score for this case yet.",
+                )
+
+        case_json = extraction.get("case_json", {})
+        result = get_appealability(case_json)
+        result["case_id"] = case_id
+        computed_at = _save_appealability_cache(
+            conn,
+            case_id=case_id,
+            fingerprint=fingerprint,
+            result=result,
+        )
+        result["_cache"] = {
+            "hit": False,
+            "fresh": True,
+            "computed_at": computed_at,
+        }
+        return result
