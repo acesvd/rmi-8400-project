@@ -21,7 +21,7 @@ This project translates your prior document-intelligence stack into a case-cente
 - `ui/app.py` Streamlit Home page
 - `ui/pages/` multipage UI (`AI Chatbox`, `My Cases`)
 - `ui/lib/` shared Streamlit helpers (API + reusable components)
-- `storage/` uploaded files, artifacts, SQLite DB file
+- `storage/` uploaded files, artifacts, local SQLite file (fallback mode)
 - `scripts/` local setup and run helpers
 
 ## Local Setup (No Docker)
@@ -160,6 +160,16 @@ Notes:
 - `APPEALS_OLLAMA_BASE_URL` accepts either `https://ollama.com` or `https://ollama.com/api`.
 - If a model is configured with a `-cloud` suffix, it will be normalized automatically for Ollama Cloud API requests.
 
+## Managed Database Mode (Cloud)
+
+By default, the backend uses local SQLite (`APPEALS_DB_PATH`). For cloud deployments, set:
+
+```bash
+export APPEALS_DATABASE_URL="postgresql://USER:PASSWORD@/DB_NAME?host=/cloudsql/PROJECT:REGION:INSTANCE"
+```
+
+When `APPEALS_DATABASE_URL` is set, the backend uses PostgreSQL and ignores the local SQLite file path.
+
 ## Demo Flow (Class)
 
 1. Create case
@@ -175,7 +185,7 @@ Notes:
 - OCR for image uploads requires a local `tesseract` binary.
 - Supported upload types: PDF, TXT, DOCX, PNG, JPG, JPEG, TIFF
 - For a quick class demo, PDF/TXT/DOCX files are usually enough.
-- Data is stored locally in `storage/appeals_os.db`.
+- Data defaults to local SQLite (`storage/appeals_os.db`), unless `APPEALS_DATABASE_URL` is configured.
 
 ## Core API Endpoints
 

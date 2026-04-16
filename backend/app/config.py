@@ -9,6 +9,7 @@ DATA_DIR = BASE_DIR / "data"
 UPLOAD_DIR = STORAGE_DIR / "uploads"
 ARTIFACT_DIR = STORAGE_DIR / "artifacts"
 DB_PATH = Path(os.getenv("APPEALS_DB_PATH", BASE_DIR / "storage" / "appeals_os.db"))
+DATABASE_URL = os.getenv("APPEALS_DATABASE_URL", "").strip()
 
 def _normalize_ollama_base_url(raw: str) -> str:
     value = (raw or "").strip().rstrip("/")
@@ -33,4 +34,5 @@ OLLAMA_TIMEOUT_SECONDS = int(os.getenv("APPEALS_OLLAMA_TIMEOUT", "180"))
 
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+if not DATABASE_URL:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
