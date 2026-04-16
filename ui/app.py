@@ -177,7 +177,7 @@ def _render_login_page() -> None:
             "Demo login credentials: `demo` / `claimright`.\n\n"
             "Admin login credentials: `admin` / `claimright-admin`."
         )
-    st.caption("Note: Admin role is fully unlocked and has access to all features.")
+        st.caption("Note: Admin role is fully unlocked and has access to all features.")
 
     st.divider()
     st.caption("Don't have an account yet?")
