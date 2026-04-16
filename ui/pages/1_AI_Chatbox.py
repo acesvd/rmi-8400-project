@@ -19,6 +19,7 @@ from lib.api import (
     select_case,
 )
 from lib.components import render_sources
+from lib.feature_flags import is_demo_mode
 
 CHAT_MODES = {"select", "general"}
 
@@ -434,6 +435,7 @@ def _mode_label(mode: str | None) -> str:
 
 
 def _render_mode_choice(cases: list[dict[str, Any]], cases_err: str | None) -> None:
+    demo_mode = is_demo_mode()
     st.markdown('<p class="section-label">Choose Chat Type</p>', unsafe_allow_html=True)
     st.markdown("### Start Here")
 
@@ -464,8 +466,11 @@ def _render_mode_choice(cases: list[dict[str, Any]], cases_err: str | None) -> N
                 icon=":material/add_circle:",
                 use_container_width=True,
                 key="chat_mode_choice_create_case_btn",
+                disabled=demo_mode,
             ):
                 open_case_workspace_create_flow()
+            if demo_mode:
+                st.caption("Demo mode is enabled. New case creation is temporarily disabled.")
 
     with general_col:
         with st.container(border=True):
@@ -756,6 +761,7 @@ def main() -> None:
     st.set_page_config(page_title="AI Chatbox", page_icon="💬", layout="wide")
     ensure_state()
     _inject_page_styles()
+    demo_mode = is_demo_mode()
 
     st.session_state.setdefault("chat_entry_mode", None)
 
@@ -837,6 +843,7 @@ def main() -> None:
                         icon=":material/add_circle:",
                         use_container_width=True,
                         key="chat_select_empty_create_case_btn",
+                        disabled=demo_mode,
                     ):
                         open_case_workspace_create_flow()
                 else:
@@ -846,6 +853,7 @@ def main() -> None:
                         icon=":material/add_circle:",
                         use_container_width=True,
                         key="chat_select_create_case_btn",
+                        disabled=demo_mode,
                     ):
                         open_case_workspace_create_flow()
 

@@ -8,6 +8,7 @@ from typing import Any
 import streamlit as st
 
 from lib.api import ensure_state, fetch_appealability, fetch_case_payload, fetch_cases, select_case
+from lib.feature_flags import is_demo_mode
 
 
 def _inject_styles() -> None:
@@ -575,6 +576,7 @@ def main() -> None:
     st.set_page_config(page_title="A-Score Dashboard", page_icon="📊", layout="wide")
     ensure_state()
     _inject_styles()
+    demo_mode = is_demo_mode()
 
     st.markdown(
         """
@@ -635,6 +637,7 @@ def main() -> None:
             icon=":material/play_arrow:",
             use_container_width=True,
             key=f"ascore_compute_btn_{case_id}",
+            disabled=demo_mode,
         )
 
     if has_saved:
@@ -647,6 +650,9 @@ def main() -> None:
         st.warning(f"Could not load saved A-Score: {saved_err}")
     else:
         st.caption("Select a case and click Compute A-Score to run and save analysis.")
+
+    if demo_mode:
+        st.caption("Demo mode is enabled. A-Score recompute is temporarily disabled.")
 
     appeal_data = None
     if compute_clicked:

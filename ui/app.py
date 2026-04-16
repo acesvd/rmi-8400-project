@@ -7,6 +7,8 @@ from pathlib import Path
 
 import streamlit as st
 
+from lib.feature_flags import is_demo_mode
+
 UI_DIR = Path(__file__).parent.resolve()
 
 APP_USERNAME_ENV = "CLAIMRIGHT_UI_USERNAME"
@@ -16,6 +18,7 @@ DEFAULT_PASSWORD = "claimright"
 HOME_PAGE = ("Home", ":material/home:")
 ABOUT_PAGE = ("About Us", ":material/info:")
 CREATE_ACCOUNT_PAGE = ("Create Account", ":material/person_add:")
+DEMO_DISCLAIMER_SEEN_KEY = "demo_mode_disclaimer_seen"
 
 PROTECTED_PAGES = [
     (str(UI_DIR / "pages" / "2_My_Cases.py"), "My Cases", ":material/dashboard:"),
@@ -33,6 +36,26 @@ def _ensure_auth_state() -> None:
     st.session_state.setdefault("redirect_to_login", False)
     st.session_state.setdefault("show_create_account_form", False)
     st.session_state.setdefault("redirect_to_home", False)
+    st.session_state.setdefault(DEMO_DISCLAIMER_SEEN_KEY, False)
+
+
+@st.dialog("Live Demo Mode Notice", width="large", dismissible=False)
+def _render_demo_mode_disclaimer_dialog() -> None:
+    st.markdown(
+        """
+        This deployment is configured for a **classroom live demo** on free-tier resources.
+
+        The following actions are temporarily disabled to keep the demo stable for all participants:
+        - New Case creation
+        - Document uploads
+        - A-Score recomputation
+
+        Full workflow behavior remains available outside demo mode.
+        """
+    )
+    if st.button("I Understand", type="primary", use_container_width=True, key="demo_mode_disclaimer_ack_btn"):
+        st.session_state[DEMO_DISCLAIMER_SEEN_KEY] = True
+        st.rerun()
 
 
 def _run_page_main(page_filename: str) -> None:
@@ -115,6 +138,7 @@ def _render_login_page() -> None:
             st.session_state["auth_username"] = username.strip()
             st.session_state["redirect_to_cases_after_login"] = True
             st.session_state["redirect_to_login"] = False
+            st.session_state[DEMO_DISCLAIMER_SEEN_KEY] = False
             st.rerun()
         else:
             st.error("Invalid username or password.")
@@ -134,12 +158,14 @@ def _run_logout_page() -> None:
     st.session_state["auth_username"] = ""
     st.session_state["show_create_account_form"] = False
     st.session_state["redirect_to_home"] = True
+    st.session_state[DEMO_DISCLAIMER_SEEN_KEY] = False
     st.rerun()
 
 
 def main() -> None:
     _ensure_auth_state()
     ui_dir = Path(__file__).parent
+    demo_mode = is_demo_mode()
 
     st.logo(
         str(ui_dir / "assets" / "logo.png"),
@@ -243,6 +269,10 @@ def main() -> None:
     )
 
     is_authenticated = bool(st.session_state.get("is_authenticated"))
+    if demo_mode and is_authenticated and not bool(st.session_state.get(DEMO_DISCLAIMER_SEEN_KEY)):
+        _render_demo_mode_disclaimer_dialog()
+        return
+
     home_page = st.Page(_run_home_page, title=HOME_PAGE[0], icon=HOME_PAGE[1], default=not is_authenticated)
     about_page = st.Page(_run_about_page, title=ABOUT_PAGE[0], icon=ABOUT_PAGE[1], default=False)
     my_cases_page: st.Page | None = None

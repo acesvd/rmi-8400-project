@@ -15,6 +15,7 @@ from .api import (
     api_post,
     safe_call,
 )
+from .feature_flags import is_demo_mode
 
 
 def render_sources(sources: list[dict[str, Any]]) -> None:
@@ -821,6 +822,8 @@ def render_upload_documents_card(case_id: str | None, *, key_prefix: str) -> Non
         st.caption("Select a case to upload documents.")
         return
 
+    demo_mode = is_demo_mode()
+
     with st.container(border=True):
         st.markdown("### Upload Documents")
         st.caption("Add denial letters, EOBs, prior auth records, or supporting medical documents.")
@@ -828,11 +831,29 @@ def render_upload_documents_card(case_id: str | None, *, key_prefix: str) -> Non
             "Upload document",
             type=["pdf", "txt", "docx", "png", "jpg", "jpeg", "tiff"],
             key=f"{key_prefix}_upload_file",
+            disabled=demo_mode,
         )
-        doc_type = st.selectbox("Doc type", DOC_TYPES, key=f"{key_prefix}_doc_type")
-        auto_process = st.toggle("Auto process on upload", value=True, key=f"{key_prefix}_auto_process")
+        doc_type = st.selectbox(
+            "Doc type",
+            DOC_TYPES,
+            key=f"{key_prefix}_doc_type",
+            disabled=demo_mode,
+        )
+        auto_process = st.toggle(
+            "Auto process on upload",
+            value=True,
+            key=f"{key_prefix}_auto_process",
+            disabled=demo_mode,
+        )
+        if demo_mode:
+            st.caption("Demo mode is enabled. Uploads are temporarily disabled.")
 
-        if st.button("Upload Document", use_container_width=True, key=f"{key_prefix}_upload_btn"):
+        if st.button(
+            "Upload Document",
+            use_container_width=True,
+            key=f"{key_prefix}_upload_btn",
+            disabled=demo_mode,
+        ):
             if uploaded is None:
                 st.error("Choose a file")
             else:

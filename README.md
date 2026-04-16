@@ -1,6 +1,35 @@
-# Claims Appeal OS Prototype (Local-First)
+# Claims Appeal OS Prototype (Deployment Branch)
 
-This project translates your prior document-intelligence stack into a case-centered insurance **Claims Appeal OS** prototype.
+This `deployment` branch is the cloud-ready version of the project for grading/demo access.
+
+It keeps the same product workflow as `main`, but the runtime architecture is different so the app can be accessed without your laptop running 24/7.
+
+## Branch Intent
+
+- `main`: local-first development and classroom demos from your machine.
+- `deployment`: hosted Streamlit + hosted FastAPI + managed storage/DB + hosted LLM.
+
+If behavior differs between environments, follow this README for the `deployment` branch.
+
+## Main vs Deployment (At a Glance)
+
+| Area | `main` (local-first) | `deployment` (cloud-first) |
+|---|---|---|
+| UI host | Local Streamlit | Streamlit Community Cloud |
+| API host | Local FastAPI | Cloud Run FastAPI |
+| LLM runtime | Local Ollama (`llama3.1`) by default | Ollama Cloud API (e.g. `gpt-oss:20b`) |
+| Database | Local SQLite (`storage/appeals_os.db`) | Postgres via `APPEALS_DATABASE_URL` (e.g. Neon) |
+| File storage | Local disk under `storage/` | Cloud Storage bucket mount for uploads/artifacts |
+| Availability | Only while your machine is on | Cloud-hosted (free-tier cold starts possible) |
+
+## Deployed Architecture
+
+- Streamlit app (`ui/app.py`) runs on Streamlit Community Cloud.
+- Streamlit calls FastAPI backend via `APPEALS_API_URL`.
+- FastAPI runs on Cloud Run.
+- FastAPI persists relational data to Postgres (`APPEALS_DATABASE_URL`).
+- Uploaded files and generated artifacts are stored in mounted Cloud Storage paths.
+- AI calls route through Ollama-compatible API settings (`APPEALS_OLLAMA_*`).
 
 ## What It Does (MVP)
 
@@ -11,181 +40,121 @@ This project translates your prior document-intelligence stack into a case-cente
 - Generate route-based task checklists
 - Generate grounded appeal letter drafts with citations
 - Generate packet PDF bundles
-- AI assistant chat for case Q&A (Ollama-first, fallback-safe)
+- AI assistant chat for case Q&A
 - Log events (submitted/followup/decision/phone_call)
 
-## Project Structure
+## Deployment Environment Variables
 
-- `backend/app/main.py` FastAPI app and endpoints
-- `backend/app/services/` extraction, retrieval, case JSON, tasks, letter, packet
-- `ui/app.py` Streamlit Home page
-- `ui/pages/` multipage UI (`AI Chatbox`, `My Cases`)
-- `ui/lib/` shared Streamlit helpers (API + reusable components)
-- `storage/` uploaded files, artifacts, local SQLite file (fallback mode)
-- `scripts/` local setup and run helpers
+Set these on Cloud Run for backend:
 
-## Local Setup (No Docker)
-
-### Prerequisites
-
-- Python 3.12 (recommended and the version to use for local setup)
-- `pip` and `venv`
-- Tesseract OCR installed and available on your system `PATH` for image OCR (`.png`, `.jpg`, `.jpeg`, `.tiff`)
-- Optional: Ollama if you want the full AI-powered extraction, letter drafting, and chat experience
-
-Notes:
-
-- PDF/TXT/DOCX flows work without Tesseract, but OCR for image uploads requires a local `tesseract` binary.
-- On Windows, installing Tesseract usually means adding the install directory to `PATH` so `pytesseract` can find `tesseract.exe`.
-- The setup scripts create a local virtual environment in `.venv` and install both backend and UI dependencies from `backend/requirements.txt` and `ui/requirements.txt`.
-- Run scripts automatically load repo-root `.env` if present.
-
-### macOS/Linux
-
-From project root:
-
-```bash
-./scripts/setup_local.sh
-cp .env.example .env
-```
-
-If your default `python3` is not Python 3.12, create/activate a Python 3.12 environment first and then run the setup script.
-
-### Windows (PowerShell)
-
-From project root:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\setup_local.ps1
-Copy-Item .env.example .env
-```
-
-The PowerShell setup script prefers `python3.12` and will fall back to other Python 3 launchers if needed, but Python 3.12 is the expected local version for this project.
-
-## Run Locally
-
-### macOS/Linux
-
-Terminal 1 (backend):
-
-```bash
-./scripts/run_backend.sh
-```
-
-Terminal 2 (UI):
-
-```bash
-./scripts/run_ui.sh
-```
-
-Single-command run (starts backend then UI):
-
-```bash
-./scripts/run_all_local.sh
-```
-
-### Windows (PowerShell)
-
-Terminal 1 (backend):
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\run_backend.ps1
-```
-
-Terminal 2 (UI):
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\run_ui.ps1
-```
-
-Single-command run (starts backend then UI):
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\run_all_local.ps1
-```
-
-Open:
-
-- UI: `http://localhost:8501`
-- API docs: `http://localhost:8000/docs`
-
-In Streamlit, use the left navigation to switch between:
-- `Home`
-- `AI Chatbox`
-- `My Cases`
-
-## Ollama AI Mode (Primary)
-
-The app is configured for **Ollama-first** behavior:
-
-- Denial extraction: Ollama primary, regex/rule fallback
-- Letter drafting: Ollama primary, template fallback
-- Chat assistant: Ollama primary, rule-based fallback
-
-Defaults:
-
-- Base URL: `http://localhost:11434`
-- Model: `llama3.1`
-
-Quick start:
-
-```bash
-ollama pull llama3.1
-ollama serve
-```
-
-Optional env vars:
-
+- `APPEALS_DATABASE_URL` (required for cloud persistence)
 - `APPEALS_OLLAMA_BASE_URL`
-- `APPEALS_OLLAMA_API_KEY` (or `OLLAMA_API_KEY`)
+- `APPEALS_OLLAMA_API_KEY`
 - `APPEALS_OLLAMA_CHAT_MODEL`
 - `APPEALS_OLLAMA_EXTRACT_MODEL`
 - `APPEALS_OLLAMA_LETTER_MODEL`
 - `APPEALS_OLLAMA_TIMEOUT`
 
-### Ollama Cloud API Mode
+Set these in Streamlit Community Cloud secrets:
 
-For cloud deployments, point backend AI calls to Ollama Cloud API:
+- `APPEALS_API_URL`
+- `APPEALS_API_TIMEOUT`
+- `CLAIMRIGHT_UI_USERNAME`
+- `CLAIMRIGHT_UI_PASSWORD`
 
-```bash
-export APPEALS_OLLAMA_BASE_URL="https://ollama.com/api"
-export APPEALS_OLLAMA_API_KEY="<your_ollama_api_key>"
-export APPEALS_OLLAMA_CHAT_MODEL="gpt-oss:20b"
-export APPEALS_OLLAMA_EXTRACT_MODEL="gpt-oss:20b"
-export APPEALS_OLLAMA_LETTER_MODEL="gpt-oss:20b"
-```
-
-Notes:
-
-- `APPEALS_OLLAMA_BASE_URL` accepts either `https://ollama.com` or `https://ollama.com/api`.
-- If a model is configured with a `-cloud` suffix, it will be normalized automatically for Ollama Cloud API requests.
-
-## Managed Database Mode (Cloud)
-
-By default, the backend uses local SQLite (`APPEALS_DB_PATH`). For cloud deployments, set:
+Example backend model config (Ollama Cloud API):
 
 ```bash
-export APPEALS_DATABASE_URL="postgresql://USER:PASSWORD@/DB_NAME?host=/cloudsql/PROJECT:REGION:INSTANCE"
+APPEALS_OLLAMA_BASE_URL=https://ollama.com
+APPEALS_OLLAMA_CHAT_MODEL=gpt-oss:20b
+APPEALS_OLLAMA_EXTRACT_MODEL=gpt-oss:20b
+APPEALS_OLLAMA_LETTER_MODEL=gpt-oss:20b
 ```
 
-When `APPEALS_DATABASE_URL` is set, the backend uses PostgreSQL and ignores the local SQLite file path.
+## Cloud Deployment Flow (This Branch)
 
-## Demo Flow (Class)
+### 1) Build and deploy backend to Cloud Run
 
-1. Create case
-2. Upload denial letter (and optional EOB/records)
-3. Run extraction
-4. Generate tasks
-5. Generate letter
-6. Generate packet PDF
-7. Log submitted/decision events
+From repo root:
 
-## Notes
+```bash
+PROJECT_ID="<your-project>"
+REGION="us-east1"
+REPO="appeals"
+SERVICE="appeals-api"
+IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${SERVICE}:latest"
 
-- OCR for image uploads requires a local `tesseract` binary.
-- Supported upload types: PDF, TXT, DOCX, PNG, JPG, JPEG, TIFF
-- For a quick class demo, PDF/TXT/DOCX files are usually enough.
-- Data defaults to local SQLite (`storage/appeals_os.db`), unless `APPEALS_DATABASE_URL` is configured.
+# Apple Silicon safe build target
+docker buildx build --platform linux/amd64 -f backend/Dockerfile -t "$IMAGE" --push .
+
+gcloud run deploy "$SERVICE" \
+  --image "$IMAGE" \
+  --region "$REGION" \
+  --allow-unauthenticated \
+  --port 8000
+```
+
+### 2) Attach DB and AI env vars
+
+```bash
+gcloud run services update "$SERVICE" --region "$REGION" \
+  --update-env-vars APPEALS_DATABASE_URL="<postgres-url>",APPEALS_OLLAMA_BASE_URL="https://ollama.com",APPEALS_OLLAMA_API_KEY="<key>",APPEALS_OLLAMA_CHAT_MODEL="gpt-oss:20b",APPEALS_OLLAMA_EXTRACT_MODEL="gpt-oss:20b",APPEALS_OLLAMA_LETTER_MODEL="gpt-oss:20b",APPEALS_OLLAMA_TIMEOUT="180"
+```
+
+### 3) Set Streamlit app to this branch
+
+In Streamlit Community Cloud settings:
+
+- Branch: `deployment`
+- Main file path: `ui/app.py`
+- Secrets include `APPEALS_API_URL=<cloud-run-url>`
+
+## Local Run (Still Supported)
+
+You can still run this branch locally for debugging.
+
+### macOS/Linux
+
+```bash
+./scripts/setup_local.sh
+cp .env.example .env
+./scripts/run_all_local.sh
+```
+
+### Windows (PowerShell)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup_local.ps1
+Copy-Item .env.example .env
+powershell -ExecutionPolicy Bypass -File .\scripts\run_all_local.ps1
+```
+
+## Notes on A-Score Behavior
+
+A-Score now supports persistent saved results in backend storage:
+
+- It shows the last saved score when available.
+- It recomputes only when explicitly requested.
+- Cache status is surfaced via API metadata (`_cache`).
+
+## Project Structure
+
+- `backend/app/main.py` FastAPI app and endpoints
+- `backend/app/services/` extraction, retrieval, case JSON, tasks, letter, packet, A-score logic
+- `backend/app/database.py` DB setup and connection mode (SQLite fallback or Postgres URL)
+- `backend/Dockerfile` backend container image build
+- `ui/app.py` Streamlit router/shell page
+- `ui/pages/` multipage UI (`AI Chatbox`, `My Cases`, `A-Score`, etc.)
+- `ui/lib/` shared Streamlit helpers
+- `scripts/` local setup and run helpers
+
+## Operational Caveats (Free Tier)
+
+- Streamlit Community Cloud can hibernate after inactivity.
+- First request after idle may take extra startup time.
+- Cloud free tiers can enforce request/quota limits.
+
+For grading submissions, disclose possible wake-up/cold-start delay.
 
 ## Core API Endpoints
 
@@ -200,4 +169,5 @@ When `APPEALS_DATABASE_URL` is set, the backend uses PostgreSQL and ignores the 
 - `POST /cases/{case_id}/packet`
 - `POST /cases/{case_id}/chat`
 - `POST /cases/{case_id}/events`
+- `GET /cases/{case_id}/appealability`
 - `GET /artifacts/{artifact_id}/download`

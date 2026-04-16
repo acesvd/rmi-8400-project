@@ -25,6 +25,7 @@ from lib.components import (
     render_tracking_table,
     render_workflow_actions_card,
 )
+from lib.feature_flags import is_demo_mode
 
 WORKSPACE_FLOW_KEY = "case_workspace_flow"
 WORKSPACE_PENDING_TITLE_KEY = "case_workspace_pending_title"
@@ -533,6 +534,7 @@ def _upload_document_to_case(
 
 
 def _render_entry_screen(cases: list[dict]) -> None:
+    demo_mode = is_demo_mode()
     st.markdown('<p class="section-label">Start Here</p>', unsafe_allow_html=True)
     st.subheader("Create a new case or continue an existing one")
     st.caption("Choose one path to enter the workspace flow.")
@@ -565,13 +567,17 @@ def _render_entry_screen(cases: list[dict]) -> None:
                 icon=":material/add_circle:",
                 use_container_width=True,
                 key="case_workspace_entry_create_btn",
+                disabled=demo_mode,
             ):
                 _clear_pending_create_title()
                 st.session_state[WORKSPACE_FLOW_KEY] = "create"
                 st.rerun()
+            if demo_mode:
+                st.caption("Demo mode is enabled. New case creation is temporarily disabled.")
 
 
 def _render_create_case_setup(cases: list[dict]) -> None:
+    demo_mode = is_demo_mode()
     st.markdown('<p class="section-label">Create Flow</p>', unsafe_allow_html=True)
     st.subheader("Create a case and add initial context")
 
@@ -605,7 +611,13 @@ def _render_create_case_setup(cases: list[dict]) -> None:
             st.subheader("New Case")
             with st.form("case_workspace_create_path_form"):
                 title = st.text_input("Case title")
-                continue_clicked = st.form_submit_button("Continue to Intake", use_container_width=True)
+                continue_clicked = st.form_submit_button(
+                    "Continue to Intake",
+                    use_container_width=True,
+                    disabled=demo_mode,
+                )
+            if demo_mode:
+                st.caption("Demo mode is enabled. New case creation is temporarily disabled.")
             if continue_clicked:
                 title = title.strip()
                 if not title:
@@ -639,6 +651,7 @@ def _render_create_case_setup(cases: list[dict]) -> None:
             type=["pdf", "txt", "docx", "png", "jpg", "jpeg", "tiff"],
             accept_multiple_files=True,
             key="case_workspace_create_upload_file",
+            disabled=demo_mode,
         )
         if uploaded_files:
             st.caption("Choose a document type for each selected file.")
@@ -659,6 +672,7 @@ def _render_create_case_setup(cases: list[dict]) -> None:
             "Auto process on upload",
             value=True,
             key="case_workspace_create_auto_process",
+            disabled=demo_mode,
         )
 
     with st.container(border=True):
@@ -751,7 +765,10 @@ def _render_create_case_setup(cases: list[dict]) -> None:
         icon=":material/arrow_forward:",
         use_container_width=True,
         key="case_workspace_create_submit_btn",
+        disabled=demo_mode,
     )
+    if demo_mode:
+        st.caption("Demo mode is enabled. Submitting a new case is temporarily disabled.")
 
     if submit_clicked:
         manual_fields = {
@@ -900,6 +917,7 @@ def _render_workspace_content(case_id: str, case_payload: dict) -> None:
 
 
 def _render_active_workspace(cases: list[dict]) -> None:
+    demo_mode = is_demo_mode()
     st.markdown('<p class="section-label">Select</p>', unsafe_allow_html=True)
     st.subheader("Case Selection")
     st.caption("Pick a case to load the workspace and continue execution.")
@@ -911,10 +929,13 @@ def _render_active_workspace(cases: list[dict]) -> None:
             icon=":material/add_circle:",
             use_container_width=True,
             key="case_workspace_active_create_btn",
+            disabled=demo_mode,
         ):
             _clear_pending_create_title()
             st.session_state[WORKSPACE_FLOW_KEY] = "create"
             st.rerun()
+        if demo_mode:
+            st.caption("Demo mode is enabled. New case creation is temporarily disabled.")
         return
 
     valid_ids = [c.get("case_id") for c in cases if c.get("case_id")]
@@ -1019,6 +1040,7 @@ def _render_active_workspace(cases: list[dict]) -> None:
                         icon=":material/add_circle:",
                         use_container_width=True,
                         key="case_workspace_active_to_create_btn",
+                        disabled=demo_mode,
                     ):
                         _clear_pending_create_title()
                         st.session_state[WORKSPACE_FLOW_KEY] = "create"

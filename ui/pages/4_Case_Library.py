@@ -3,6 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 from lib.api import delete_case, ensure_state, fetch_cases, open_case_workspace_create_flow, select_case
+from lib.feature_flags import is_demo_mode
 
 
 def _inject_styles() -> None:
@@ -163,6 +164,7 @@ def _delete_case(case_id: str) -> None:
 def main() -> None:
     st.set_page_config(page_title="Case Library", page_icon="📚", layout="wide")
     ensure_state()
+    demo_mode = is_demo_mode()
     if "case_library_confirm_delete_id" not in st.session_state:
         st.session_state.case_library_confirm_delete_id = None
     _inject_styles()
@@ -208,8 +210,11 @@ def main() -> None:
                 icon=":material/add_circle:",
                 use_container_width=True,
                 key="case_library_create_case_btn",
+                disabled=demo_mode,
             ):
                 open_case_workspace_create_flow()
+            if demo_mode:
+                st.caption("Demo mode is enabled. New case creation is temporarily disabled.")
 
     with top_col2:
         with st.container(border=True):
